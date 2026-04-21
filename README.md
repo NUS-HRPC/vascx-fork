@@ -140,8 +140,3 @@ pytest tests/test_e2e.py -q -k cpu                                      # real-m
 ```
 
 The e2e test skips automatically when model weights have not been downloaded.
-
-## Upstream Reference
-
-- Upstream: <https://huggingface.co/Eyened/vascx>
-- Paper: <https://arxiv.org/abs/2409.16016>

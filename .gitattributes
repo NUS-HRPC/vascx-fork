@@ -1,4 +1,0 @@
-*.png -filter -diff -merge
-*.jpg -filter -diff -merge
-*.jpeg -filter -diff -merge
-*.pt -filter -diff -merge
