@@ -1,6 +1,6 @@
 # VascX Fork
 
-[![CI](https://github.com/zyf0717/vascx-fork/actions/workflows/ci.yml/badge.svg)](https://github.com/zyf0717/vascx-fork/actions/workflows/ci.yml)
+[![CI](https://github.com/zyf0717/vascx-fork/actions/workflows/ci.yaml/badge.svg)](https://github.com/zyf0717/vascx-fork/actions/workflows/ci.yaml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 
