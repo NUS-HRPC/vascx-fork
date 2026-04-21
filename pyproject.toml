@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "vascx_models"
+version = "0.0.0"
+description = "Retinal analysis toolbox for Python"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Jose Vargas", email = "j.vargasquiros@erasmusmc.nl" }]
+requires-python = ">=3.10, <3.13"
+dependencies = [
+    "numpy==2.*",
+    "pandas==2.*",
+    "tqdm==4.*",
+    "Pillow==11.*",
+    "click==8.*",
+    "PyYAML==6.*",
+    "scikit-image",
+    "huggingface_hub",
+    "retinalysis-fundusprep",
+    "retinalysis-inference",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vascx_models*"]
