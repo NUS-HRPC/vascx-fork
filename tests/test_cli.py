@@ -83,7 +83,7 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
         return df
 
     def fake_batch_create_overlays(**kwargs):
-        calls["batch_create_overlays"] = kwargs
+        calls.setdefault("batch_create_overlays", []).append(kwargs)
 
     monkeypatch.setattr("vascx_models.cli.generate_disc_circles", fake_generate_disc_circles)
     monkeypatch.setattr(
@@ -148,10 +148,33 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
     assert calls["measure_vessel_widths"]["samples_per_connection"] == 4
     assert calls["generate_disc_circles"]["circles"][0].name == "2r"
     assert calls["generate_disc_circles"]["circles"][0].color == (0, 255, 0)
-    assert calls["batch_create_overlays"]["vessels_dir"] == output_dir / "vessels"
-    measurement_data = calls["batch_create_overlays"]["vessel_width_data"]
+    overlay_calls = calls["batch_create_overlays"]
+    assert len(overlay_calls) == 2
+    assert overlay_calls[0]["output_dir"] == output_dir / "overlays"
+    assert overlay_calls[0]["vessels_dir"] == output_dir / "vessels"
+    measurement_data = overlay_calls[0]["vessel_width_data"]
     assert isinstance(measurement_data, pd.DataFrame)
     assert measurement_data.iloc[0]["width_px"] == 7.0
+    assert overlay_calls[1]["output_dir"] == output_dir / "vessel_equivalent_overlays"
+    selected_measurement_data = overlay_calls[1]["vessel_width_data"]
+    assert isinstance(selected_measurement_data, pd.DataFrame)
+    assert selected_measurement_data.iloc[0]["width_px"] == 7.0
+
+    vessel_equivalents = pd.read_csv(output_dir / "vessel_equivalents.csv")
+    assert vessel_equivalents.columns.tolist() == [
+        "image_id",
+        "metric",
+        "vessel_type",
+        "requested_n_largest",
+        "n_vessels_available",
+        "n_vessels_used",
+        "vessel_ids_used",
+        "mean_widths_used_px",
+        "equivalent_px",
+    ]
+    assert vessel_equivalents.iloc[0]["metric"] == "CRAE"
+    assert vessel_equivalents.iloc[0]["vessel_ids_used"] == "artery_1"
+    assert vessel_equivalents.iloc[0]["n_vessels_used"] == 1
 
 
 def test_cli_run_reports_missing_path_column_in_csv(tmp_path: Path, caplog) -> None:

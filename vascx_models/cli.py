@@ -1,5 +1,6 @@
 import logging
 import warnings
+from dataclasses import replace
 from pathlib import Path
 
 import click
@@ -22,8 +23,10 @@ from .inference import (
     run_segmentation_vessels_and_av,
 )
 from .vessel_widths import (
+    compute_revised_crx_from_widths,
     measure_vessel_widths_between_disc_circle_pair,
     resolve_vessel_width_circle_pair,
+    select_vessel_width_measurements_for_equivalents,
 )
 from .utils import batch_create_overlays
 
@@ -139,6 +142,9 @@ def run(
     fovea_path = output_path / "fovea.csv" if fovea else None
     disc_geometry_path = output_path / "disc_geometry.csv" if disc else None
     vessel_widths_path = output_path / "vessel_widths.csv" if disc and vessels else None
+    vessel_equivalents_path = (
+        output_path / "vessel_equivalents.csv" if disc and vessels else None
+    )
 
     # Determine if input is a folder or CSV file
     data_path = Path(data_path)
@@ -257,6 +263,7 @@ def run(
 
     # Step 5: Measure vessel widths along simple vessel paths between the configured circle pair
     df_vessel_widths = None
+    df_selected_equivalent_widths = None
     if disc and vessels:
         try:
             inner_circle, outer_circle = resolve_vessel_width_circle_pair(
@@ -281,6 +288,15 @@ def run(
             outer_circle=outer_circle,
             output_path=vessel_widths_path,
             samples_per_connection=app_config.vessel_widths.samples_per_connection,
+        )
+        df_connection_widths, df_vessel_equivalents = compute_revised_crx_from_widths(
+            df_vessel_widths,
+        )
+        df_vessel_equivalents.to_csv(vessel_equivalents_path, index=False)
+        logger.info("Vessel equivalents saved to %s", vessel_equivalents_path)
+        df_selected_equivalent_widths = select_vessel_width_measurements_for_equivalents(
+            df_vessel_widths,
+            df_connection_widths,
         )
 
     # Step 6: Run fovea detection if requested
@@ -313,12 +329,38 @@ def run(
             disc_dir=disc_path,
             vessels_dir=vessels_path,
             circle_dirs={
-                circle.name: disc_circles_path / circle.name for circle in app_config.overlay.circles
+                circle.name: disc_circles_path / circle.name
+                for circle in app_config.overlay.circles
             },
             vessel_width_data=df_vessel_widths,
             fovea_data=fovea_data,
             overlay_config=app_config.overlay,
         )
+
+        if df_selected_equivalent_widths is not None:
+            vessel_equivalent_overlay_path = output_path / "vessel_equivalent_overlays"
+            equivalent_overlay_config = replace(
+                app_config.overlay,
+                layers=replace(app_config.overlay.layers, vessel_widths=True),
+            )
+            batch_create_overlays(
+                rgb_dir=preprocess_rgb_path if preprocess else data_path,
+                output_dir=vessel_equivalent_overlay_path,
+                av_dir=av_path,
+                disc_dir=disc_path,
+                vessels_dir=vessels_path,
+                circle_dirs={
+                    circle.name: disc_circles_path / circle.name
+                    for circle in app_config.overlay.circles
+                },
+                vessel_width_data=df_selected_equivalent_widths,
+                fovea_data=fovea_data,
+                overlay_config=equivalent_overlay_config,
+            )
+            logger.info(
+                "Vessel equivalent selection overlays saved to %s",
+                vessel_equivalent_overlay_path,
+            )
 
         logger.info("Visualization overlays saved to %s", overlay_path)
 

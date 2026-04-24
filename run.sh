@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONDA_ENV="${CONDA_ENV:-vascx-fork}"
 SAMPLE_INPUT_PATH="$REPO_ROOT/samples/fundus/original"
-DEFAULT_INPUT_PATH="$SAMPLE_INPUT_PATH"
+DEFAULT_INPUT_PATH="images"
 INPUT_PATH="${INPUT_PATH:-$DEFAULT_INPUT_PATH}"
 TIMESTAMP="$(date +"%Y%m%d_%H%M%S")"
 DEFAULT_OUTPUT_PATH="$REPO_ROOT/output_$TIMESTAMP"

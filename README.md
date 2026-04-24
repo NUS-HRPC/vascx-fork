@@ -125,9 +125,11 @@ OUTPUT_PATH/
 ├── disc/
 ├── disc_circles/      # one subdirectory per configured circle name
 ├── overlays/
+├── vessel_equivalent_overlays/
 ├── bounds.csv
 ├── disc_geometry.csv
 ├── vessel_widths.csv
+├── vessel_equivalents.csv
 ├── quality.csv
 └── fovea.csv
 ```

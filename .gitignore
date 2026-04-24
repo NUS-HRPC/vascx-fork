@@ -1,10 +1,23 @@
+# Python bytecode and extensions
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Python packaging and environments
 *.egg
 *.egg-info
 .Python
+.venv/
+ENV/
+env/
+venv/
+build/
+dist/
+pip-wheel-metadata/
+site/
+
+# Test, coverage, and analysis caches
 .coverage
 .coverage.*
 .hypothesis/
@@ -15,22 +28,20 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .tox/
-.venv/
-ENV/
-build/
-dist/
-env/
 htmlcov/
-pip-wheel-metadata/
-site/
-venv/
-*.zip
-.DS_Store
+
+# Local tool caches and config
 .cache/
 .mplconfig/
+
+# Local data and generated outputs
+images/
 model_releases/
 output_*/
 output_*.zip
+*.zip
+
+# Model weights
 /artery_vein/*.pt
 /disc/*.pt
 /discedge/*.pt
@@ -38,5 +49,10 @@ output_*.zip
 /odfd/*.pt
 /quality/*.pt
 /vessels/*.pt
+
+# Sample data, except checked-in originals
 /samples/fundus/*
 !/samples/fundus/original
+
+# OS files
+.DS_Store

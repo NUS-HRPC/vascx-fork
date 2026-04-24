@@ -1,6 +1,8 @@
 import logging
+import math
+from collections import deque
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -218,81 +220,246 @@ def _component_neighbor_map(component: np.ndarray) -> dict[tuple[int, int], list
         for dy, dx in _NEIGHBORS_8:
             candidate = (y + dy, x + dx)
             if candidate in points:
+                if dy != 0 and dx != 0 and (
+                    (y + dy, x) in points or (y, x + dx) in points
+                ):
+                    continue
                 adjacent.append(candidate)
         neighbors[(y, x)] = adjacent
     return neighbors
 
 
-def _has_branch_on_full_skeleton(
-    ordered_path_yx: np.ndarray,
-    full_skeleton_neighbors: dict[tuple[int, int], list[tuple[int, int]]],
-) -> bool:
-    for y_value, x_value in ordered_path_yx:
-        point = (int(y_value), int(x_value))
-        if len(full_skeleton_neighbors.get(point, ())) > 2:
-            return True
-    return False
-
-
-def _ordered_path_component(component: np.ndarray) -> Optional[np.ndarray]:
-    if len(component) < 2:
-        return None
-
-    neighbors = _component_neighbor_map(component)
-    if any(len(adjacent) > 2 for adjacent in neighbors.values()):
-        # TODO: Handle bifurcations by splitting the annulus skeleton into branch-wise paths.
-        return None
-
-    endpoints = [point for point, adjacent in neighbors.items() if len(adjacent) == 1]
-    if len(endpoints) != 2:
-        # TODO: Handle loops and fragmented shapes that do not reduce to a single open path.
-        return None
-
-    ordered: list[tuple[int, int]] = [endpoints[0]]
-    previous: Optional[tuple[int, int]] = None
-    current = endpoints[0]
-
-    while True:
-        candidates = [point for point in neighbors[current] if point != previous]
-        if not candidates:
-            break
-        if len(candidates) != 1:
-            return None
-        next_point = candidates[0]
-        ordered.append(next_point)
-        previous, current = current, next_point
-
-    if len(ordered) != len(component):
-        return None
-    return np.asarray(ordered, dtype=float)
-
-
-def _endpoint_circle_roles(
-    endpoint_distances: np.ndarray,
+def _boundary_roles_for_component(
+    component: np.ndarray,
+    distances: np.ndarray,
     inner_radius_px: float,
     outer_radius_px: float,
     boundary_tolerance_px: float,
-) -> Optional[tuple[str, str]]:
-    roles: list[str] = []
-    for endpoint_distance in endpoint_distances:
-        inner_delta = abs(float(endpoint_distance) - inner_radius_px)
-        outer_delta = abs(float(endpoint_distance) - outer_radius_px)
-        if inner_delta <= boundary_tolerance_px and outer_delta > boundary_tolerance_px:
-            roles.append("inner")
+) -> dict[tuple[int, int], str]:
+    candidates: dict[str, list[tuple[float, tuple[int, int]]]] = {"inner": [], "outer": []}
+    roles: dict[tuple[int, int], str] = {}
+    for y_value, x_value in component:
+        y = int(y_value)
+        x = int(x_value)
+        inner_delta = abs(float(distances[y, x]) - inner_radius_px)
+        outer_delta = abs(float(distances[y, x]) - outer_radius_px)
+        is_inner = inner_delta <= boundary_tolerance_px
+        is_outer = outer_delta <= boundary_tolerance_px
+        if is_inner == is_outer:
             continue
-        if outer_delta <= boundary_tolerance_px and inner_delta > boundary_tolerance_px:
-            roles.append("outer")
-            continue
-        if inner_delta <= boundary_tolerance_px and outer_delta <= boundary_tolerance_px:
-            # TODO: Disambiguate endpoints when the annulus is too thin or tolerances overlap.
-            return None
-        return None
+        if is_inner:
+            candidates["inner"].append((inner_delta, (y, x)))
+        else:
+            candidates["outer"].append((outer_delta, (y, x)))
 
-    role_pair = (roles[0], roles[1])
-    if set(role_pair) != {"inner", "outer"}:
-        # TODO: Support components that contact the same boundary multiple times.
-        return None
-    return role_pair
+    for role, role_candidates in candidates.items():
+        candidate_deltas = {node: delta for delta, node in role_candidates}
+        remaining = set(candidate_deltas)
+        while remaining:
+            seed = remaining.pop()
+            group = [seed]
+            stack = [seed]
+            while stack:
+                node_y, node_x = stack.pop()
+                for dy, dx in _NEIGHBORS_8:
+                    neighbor = (node_y + dy, node_x + dx)
+                    if neighbor not in remaining:
+                        continue
+                    remaining.remove(neighbor)
+                    group.append(neighbor)
+                    stack.append(neighbor)
+
+            representative = min(group, key=lambda node: (candidate_deltas[node], node))
+            roles[representative] = role
+    return roles
+
+
+def _active_subgraph(
+    neighbors: dict[tuple[int, int], list[tuple[int, int]]],
+    active_nodes: set[tuple[int, int]],
+) -> dict[tuple[int, int], list[tuple[int, int]]]:
+    return {
+        node: [neighbor for neighbor in neighbors[node] if neighbor in active_nodes]
+        for node in active_nodes
+    }
+
+
+def _prune_to_inner_outer_nodes(
+    neighbors: dict[tuple[int, int], list[tuple[int, int]]],
+    boundary_roles: dict[tuple[int, int], str],
+) -> set[tuple[int, int]]:
+    """Remove dead-end skeleton pixels that are not needed for inner-to-outer traces."""
+    active_nodes = set(neighbors)
+    terminal_nodes = set(boundary_roles)
+    queue = deque(
+        node
+        for node in active_nodes
+        if node not in terminal_nodes
+        and sum(1 for neighbor in neighbors[node] if neighbor in active_nodes) <= 1
+    )
+
+    while queue:
+        node = queue.popleft()
+        if node not in active_nodes or node in terminal_nodes:
+            continue
+        active_degree = sum(1 for neighbor in neighbors[node] if neighbor in active_nodes)
+        if active_degree > 1:
+            continue
+
+        active_nodes.remove(node)
+        for neighbor in neighbors[node]:
+            if neighbor not in active_nodes or neighbor in terminal_nodes:
+                continue
+            neighbor_degree = sum(
+                1 for next_neighbor in neighbors[neighbor] if next_neighbor in active_nodes
+            )
+            if neighbor_degree <= 1:
+                queue.append(neighbor)
+
+    return active_nodes
+
+
+def _connected_node_groups(
+    graph: dict[tuple[int, int], list[tuple[int, int]]],
+) -> list[set[tuple[int, int]]]:
+    remaining = set(graph)
+    groups: list[set[tuple[int, int]]] = []
+    while remaining:
+        seed = remaining.pop()
+        group = {seed}
+        stack = [seed]
+        while stack:
+            node = stack.pop()
+            for neighbor in graph[node]:
+                if neighbor not in remaining:
+                    continue
+                remaining.remove(neighbor)
+                group.add(neighbor)
+                stack.append(neighbor)
+        groups.append(group)
+    return groups
+
+
+def _trace_segments_between_key_nodes(
+    graph: dict[tuple[int, int], list[tuple[int, int]]],
+    key_nodes: set[tuple[int, int]],
+    boundary_roles: dict[tuple[int, int], str],
+) -> list[np.ndarray]:
+    key_graph = {
+        node: [neighbor for neighbor in graph[node] if neighbor in key_nodes]
+        for node in key_nodes
+    }
+    key_groups = _connected_node_groups(key_graph)
+    key_group_by_node = {
+        node: group_index
+        for group_index, group in enumerate(key_groups)
+        for node in group
+    }
+    boundary_groups = {
+        group_index
+        for group_index, group in enumerate(key_groups)
+        if any(node in boundary_roles for node in group)
+    }
+
+    segments: list[np.ndarray] = []
+    visited_edges: set[frozenset[tuple[int, int]]] = set()
+
+    for start in sorted(key_nodes):
+        for first_neighbor in sorted(graph[start]):
+            if (
+                first_neighbor in key_nodes
+                and key_group_by_node[first_neighbor] == key_group_by_node[start]
+            ):
+                continue
+            first_edge = frozenset((start, first_neighbor))
+            if first_edge in visited_edges:
+                continue
+
+            start_group = key_group_by_node[start]
+            path: list[tuple[int, int]] = []
+            if start_group in boundary_groups:
+                path.append(start)
+            if first_neighbor not in key_nodes:
+                path.append(first_neighbor)
+            visited_edges.add(first_edge)
+            previous = start
+            current = first_neighbor
+
+            while current not in key_nodes:
+                candidates = [neighbor for neighbor in graph[current] if neighbor != previous]
+                if len(candidates) != 1:
+                    break
+                next_node = candidates[0]
+                next_edge = frozenset((current, next_node))
+                if next_edge in visited_edges:
+                    break
+                visited_edges.add(next_edge)
+                path.append(next_node)
+                previous, current = current, next_node
+
+            if current in key_nodes and key_group_by_node[current] in boundary_groups:
+                path.append(current)
+
+            if len(path) >= 2:
+                segments.append(np.asarray(path, dtype=float))
+
+    return segments
+
+
+def _inner_outer_branch_segments(
+    component: np.ndarray,
+    distances: np.ndarray,
+    inner_radius_px: float,
+    outer_radius_px: float,
+    boundary_tolerance_px: float,
+) -> list[np.ndarray]:
+    """Return inner-side trunk segments from components with inner-to-outer traces."""
+    neighbors = _component_neighbor_map(component)
+    boundary_roles = _boundary_roles_for_component(
+        component=component,
+        distances=distances,
+        inner_radius_px=inner_radius_px,
+        outer_radius_px=outer_radius_px,
+        boundary_tolerance_px=boundary_tolerance_px,
+    )
+    if "inner" not in boundary_roles.values() or "outer" not in boundary_roles.values():
+        return []
+
+    active_nodes = _prune_to_inner_outer_nodes(neighbors, boundary_roles)
+    active_graph = _active_subgraph(neighbors, active_nodes)
+    segments: list[np.ndarray] = []
+
+    for group in _connected_node_groups(active_graph):
+        group_roles = {
+            role for node, role in boundary_roles.items() if node in group
+        }
+        if group_roles != {"inner", "outer"}:
+            continue
+
+        group_graph = _active_subgraph(active_graph, group)
+        key_nodes = {
+            node
+            for node, adjacent in group_graph.items()
+            if node in boundary_roles
+            or len(adjacent) != 2
+        }
+        if len(key_nodes) < 2:
+            continue
+
+        for segment in _trace_segments_between_key_nodes(group_graph, key_nodes, boundary_roles):
+            endpoint_roles = {
+                boundary_roles.get((int(segment[0, 0]), int(segment[0, 1]))),
+                boundary_roles.get((int(segment[-1, 0]), int(segment[-1, 1]))),
+            }
+            if "inner" not in endpoint_roles:
+                continue
+            if distances[int(segment[0, 0]), int(segment[0, 1])] > distances[
+                int(segment[-1, 0]), int(segment[-1, 1])
+            ]:
+                segment = segment[::-1]
+            segments.append(segment)
+
+    return segments
 
 
 def _path_cumulative_lengths(path_xy: np.ndarray) -> np.ndarray:
@@ -331,7 +498,10 @@ def _interpolate_path_point(
     return path_xy[lower_index] + fraction * (path_xy[upper_index] - path_xy[lower_index])
 
 
-def _typed_vessel_masks(vessel_mask: np.ndarray, av_mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _typed_vessel_masks(
+    vessel_mask: np.ndarray,
+    av_mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
     """Split the vessel mask into artery and vein masks using the AV segmentation."""
     artery_mask = vessel_mask & np.isin(av_mask, (1, 3))
     vein_mask = vessel_mask & np.isin(av_mask, (2, 3))
@@ -365,7 +535,6 @@ def _path_records_for_image(
     skeleton = _skeletonize(vessel_mask)
     if not np.any(skeleton):
         return []
-    full_skeleton_neighbors = _component_neighbor_map(np.argwhere(skeleton))
 
     yy, xx = np.indices(vessel_mask.shape, dtype=float)
     distances = np.hypot(xx - disc_center_xy[0], yy - disc_center_xy[1])
@@ -375,99 +544,87 @@ def _path_records_for_image(
     records: List[dict] = []
     connection_index = 0
     for component in components:
-        ordered_path_yx = _ordered_path_component(component)
-        if ordered_path_yx is None:
-            logger.debug("Skipping %s annulus component because it is not a simple open path", image_id)
-            continue
-        if _has_branch_on_full_skeleton(ordered_path_yx, full_skeleton_neighbors):
-            # TODO: Support components whose annulus segment is simple but attaches to a branch outside the annulus.
-            logger.debug(
-                "Skipping %s annulus component because it branches in the full vessel skeleton",
-                image_id,
-            )
-            continue
-
-        path_xy = ordered_path_yx[:, ::-1]
-        endpoint_distances = np.array(
-            [
-                distances[int(ordered_path_yx[0, 0]), int(ordered_path_yx[0, 1])],
-                distances[int(ordered_path_yx[-1, 0]), int(ordered_path_yx[-1, 1])],
-            ],
-            dtype=float,
-        )
-        endpoint_roles = _endpoint_circle_roles(
-            endpoint_distances=endpoint_distances,
+        branch_segments_yx = _inner_outer_branch_segments(
+            component=component,
+            distances=distances,
             inner_radius_px=inner_radius_px,
             outer_radius_px=outer_radius_px,
             boundary_tolerance_px=boundary_tolerance_px,
         )
-        if endpoint_roles is None:
+        if not branch_segments_yx:
             logger.debug(
-                "Skipping %s annulus component because its endpoints are not a simple inner-to-outer pair",
+                "Skipping %s annulus component because it has no inner-to-outer trace",
                 image_id,
             )
             continue
 
-        if endpoint_roles[0] != "inner":
-            ordered_path_yx = ordered_path_yx[::-1]
-            path_xy = path_xy[::-1]
-            endpoint_distances = endpoint_distances[::-1]
+        for segment_yx in branch_segments_yx:
+            path_xy = segment_yx[:, ::-1]
 
-        cumulative_lengths = _path_cumulative_lengths(path_xy)
-        if len(cumulative_lengths) == 0 or cumulative_lengths[-1] <= 0.0:
-            logger.debug("Skipping %s annulus component because its path length is zero", image_id)
-            continue
-
-        component_records: List[dict] = []
-        connection_index += 1
-        for sample_index in range(1, samples_per_connection + 1):
-            target_fraction = sample_index / (samples_per_connection + 1)
-            center_xy = _interpolate_path_point(
-                path_xy=path_xy,
-                cumulative_lengths=cumulative_lengths,
-                target_length=float(cumulative_lengths[-1] * target_fraction),
-            )
-            width_value, start_xy, end_xy = measure_vessel_width_at_coordinate(
-                vessel_mask=vessel_mask,
-                point_xy=center_xy,
-                skeleton=skeleton,
-                tangent_window_px=tangent_window_px,
-                measurement_step_px=measurement_step_px,
-            )
-            if np.isnan(width_value):
-                # TODO: Recover from local tangent/width failures by re-sampling nearby skeleton points.
-                component_records = []
+            cumulative_lengths = _path_cumulative_lengths(path_xy)
+            if len(cumulative_lengths) == 0 or cumulative_lengths[-1] <= 0.0:
                 logger.debug(
-                    "Skipping %s connection %d because width measurement failed at sample %d",
+                    "Skipping %s annulus segment because its path length is zero",
                     image_id,
-                    connection_index,
-                    sample_index,
                 )
-                break
+                continue
 
-            component_records.append(
-                {
-                    "image_id": image_id,
-                    "inner_circle": inner_circle.name,
-                    "outer_circle": outer_circle.name,
-                    "inner_circle_radius_px": inner_radius_px,
-                    "outer_circle_radius_px": outer_radius_px,
-                    "connection_index": connection_index,
-                    "sample_index": sample_index,
-                    "x": float(center_xy[0]),
-                    "y": float(center_xy[1]),
-                    "width_px": float(width_value),
-                    "x_start": float(start_xy[0]),
-                    "y_start": float(start_xy[1]),
-                    "x_end": float(end_xy[0]),
-                    "y_end": float(end_xy[1]),
-                    "vessel_type": vessel_type,
-                }
-            )
+            segment_skeleton = np.zeros_like(skeleton, dtype=bool)
+            segment_rows = segment_yx[:, 0].astype(int)
+            segment_cols = segment_yx[:, 1].astype(int)
+            segment_skeleton[segment_rows, segment_cols] = True
 
-        if len(component_records) != samples_per_connection:
-            continue
-        records.extend(component_records)
+            component_records: List[dict] = []
+            connection_index += 1
+            for sample_index in range(1, samples_per_connection + 1):
+                target_fraction = sample_index / (samples_per_connection + 1)
+                center_xy = _interpolate_path_point(
+                    path_xy=path_xy,
+                    cumulative_lengths=cumulative_lengths,
+                    target_length=float(cumulative_lengths[-1] * target_fraction),
+                )
+                width_value, start_xy, end_xy = measure_vessel_width_at_coordinate(
+                    vessel_mask=vessel_mask,
+                    point_xy=center_xy,
+                    skeleton=segment_skeleton,
+                    tangent_window_px=tangent_window_px,
+                    measurement_step_px=measurement_step_px,
+                )
+                if np.isnan(width_value):
+                    # TODO: Recover from local tangent/width failures by re-sampling nearby
+                    # skeleton points.
+                    component_records = []
+                    logger.debug(
+                        "Skipping %s connection %d because width measurement failed at sample %d",
+                        image_id,
+                        connection_index,
+                        sample_index,
+                    )
+                    break
+
+                component_records.append(
+                    {
+                        "image_id": image_id,
+                        "inner_circle": inner_circle.name,
+                        "outer_circle": outer_circle.name,
+                        "inner_circle_radius_px": inner_radius_px,
+                        "outer_circle_radius_px": outer_radius_px,
+                        "connection_index": connection_index,
+                        "sample_index": sample_index,
+                        "x": float(center_xy[0]),
+                        "y": float(center_xy[1]),
+                        "width_px": float(width_value),
+                        "x_start": float(start_xy[0]),
+                        "y_start": float(start_xy[1]),
+                        "x_end": float(end_xy[0]),
+                        "y_end": float(end_xy[1]),
+                        "vessel_type": vessel_type,
+                    }
+                )
+
+            if len(component_records) != samples_per_connection:
+                continue
+            records.extend(component_records)
 
     return records
 
@@ -602,3 +759,229 @@ def measure_vessel_widths_between_disc_circle_pair(
         df_widths.to_csv(output_path, index=False)
         logger.info("Vessel path width measurements saved to %s", output_path)
     return df_widths
+
+
+def revised_vessel_equivalent(
+    diameters: Iterable[float],
+    vessel_type: str,
+    n_largest: int = 6,
+    return_rounds: bool = False,
+):
+    """
+    Compute revised CRAE-6 or CRVE-6 using the Knudtson revised formula.
+
+    Parameters
+    ----------
+    diameters:
+        Vessel diameters in consistent units: pixels, microns, etc.
+    vessel_type:
+        Accepts 'artery'|'arteriole' or 'vein'|'venule'.
+    n_largest:
+        Number of largest vessels to use. Standard revised method uses 6.
+    return_rounds:
+        If True, also return intermediate rounds for inspection.
+
+    Returns
+    -------
+    float
+        Final equivalent vessel diameter.
+    """
+
+    coeffs = {
+        "arteriole": 0.88,
+        "venule": 0.95,
+    }
+
+    # Accept synonyms
+    if vessel_type in ("artery", "arteriole"):
+        vt = "arteriole"
+    elif vessel_type in ("vein", "venule"):
+        vt = "venule"
+    else:
+        raise ValueError("vessel_type must be 'arteriole'/'artery' or 'venule'/'vein'.")
+
+    coeff = coeffs[vt]
+
+    values = sorted([float(x) for x in diameters if float(x) > 0.0], reverse=True)[:n_largest]
+
+    if len(values) < 2:
+        raise ValueError("Need at least two valid vessel diameters.")
+
+    rounds: list[list[float]] = [values.copy()]
+
+    while len(values) > 1:
+        values = sorted(values, reverse=True)
+
+        next_values: list[float] = []
+
+        # Pair largest with smallest.
+        while len(values) >= 2:
+            largest = values.pop(0)
+            smallest = values.pop(-1)
+
+            combined = coeff * math.sqrt(largest**2 + smallest**2)
+            next_values.append(combined)
+
+        # If odd count remains, carry the middle value forward unchanged.
+        if values:
+            next_values.append(values[0])
+
+        values = next_values
+        rounds.append(values.copy())
+
+    result = float(values[0])
+
+    if return_rounds:
+        return result, rounds
+
+    return result
+
+
+def compute_revised_crx_from_widths(
+    df_widths: pd.DataFrame,
+    n_largest: int = 6,
+    return_rounds: bool = False,
+):
+    """Aggregate per-connection mean widths and compute revised CRAE/CRVE.
+
+    Parameters
+    ----------
+    df_widths:
+        DataFrame produced by `measure_vessel_widths_between_disc_circle_pair` containing
+        per-sample `width_px` values and `connection_index` identifiers.
+    n_largest:
+        Number of largest vessel averages to consider (default 6).
+    return_rounds:
+        If True, also return the intermediate rounds from the revised algorithm
+        for each image/vessel_type as a mapping.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame] or tuple[pd.DataFrame, pd.DataFrame, dict]
+        Returns `(df_connections, df_equivalents)` or
+        `(df_connections, df_equivalents, rounds_map)` when `return_rounds` is True.
+        `df_connections` contains the per-connection mean widths and selection flags.
+    """
+
+    cols_conn = [
+        "image_id",
+        "vessel_type",
+        "connection_index",
+        "vessel_id",
+        "inner_circle",
+        "outer_circle",
+        "inner_circle_radius_px",
+        "outer_circle_radius_px",
+        "mean_width_px",
+        "n_samples",
+        "selected_for_equivalent",
+    ]
+    cols_equiv = [
+        "image_id",
+        "metric",
+        "vessel_type",
+        "requested_n_largest",
+        "n_vessels_available",
+        "n_vessels_used",
+        "vessel_ids_used",
+        "mean_widths_used_px",
+        "equivalent_px",
+    ]
+
+    if df_widths.empty:
+        df_conn_empty = pd.DataFrame(columns=cols_conn)
+        df_equiv_empty = pd.DataFrame(columns=cols_equiv)
+        if return_rounds:
+            return df_conn_empty, df_equiv_empty, {}
+        return df_conn_empty, df_equiv_empty
+
+    group_cols = [
+        "image_id",
+        "vessel_type",
+        "connection_index",
+        "inner_circle",
+        "outer_circle",
+        "inner_circle_radius_px",
+        "outer_circle_radius_px",
+    ]
+
+    df_conn = (
+        df_widths.groupby(group_cols, dropna=False)
+        .agg(mean_width_px=("width_px", "mean"), n_samples=("width_px", "count"))
+        .reset_index()
+    )
+    df_conn["vessel_id"] = df_conn.apply(
+        lambda row: f"{row['vessel_type']}_{int(row['connection_index'])}",
+        axis=1,
+    )
+    df_conn["selected_for_equivalent"] = False
+    df_conn = df_conn[cols_conn]
+
+    results: list[dict] = []
+    rounds_map: dict[tuple[str, str], list[list[float]]] = {}
+
+    for (image_id, vessel_type), group in df_conn.groupby(["image_id", "vessel_type"]):
+        top = group.sort_values(
+            ["mean_width_px", "connection_index"],
+            ascending=[False, True],
+        ).head(n_largest)
+        df_conn.loc[top.index, "selected_for_equivalent"] = True
+        diameters = top["mean_width_px"].tolist()
+        metric = "CRAE" if vessel_type == "artery" else "CRVE"
+        result = {
+            "image_id": image_id,
+            "metric": metric,
+            "vessel_type": vessel_type,
+            "requested_n_largest": int(n_largest),
+            "n_vessels_available": int(len(group)),
+            "n_vessels_used": int(len(top)),
+            "vessel_ids_used": ";".join(str(value) for value in top["vessel_id"]),
+            "mean_widths_used_px": ";".join(f"{float(value):.6g}" for value in diameters),
+            "equivalent_px": float("nan"),
+        }
+        try:
+            if return_rounds:
+                eq, rounds = revised_vessel_equivalent(
+                    diameters,
+                    vessel_type,
+                    n_largest=n_largest,
+                    return_rounds=True,
+                )
+                rounds_map[(image_id, vessel_type)] = rounds
+            else:
+                eq = revised_vessel_equivalent(diameters, vessel_type, n_largest=n_largest)
+            result["equivalent_px"] = float(eq)
+        except ValueError:
+            pass
+        results.append(result)
+
+    df_equiv = pd.DataFrame.from_records(results, columns=cols_equiv)
+
+    if return_rounds:
+        return df_conn, df_equiv, rounds_map
+
+    return df_conn, df_equiv
+
+
+def select_vessel_width_measurements_for_equivalents(
+    df_widths: pd.DataFrame,
+    df_connections: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return per-sample width rows whose vessels were selected for CRAE/CRVE."""
+    if df_widths.empty or df_connections.empty:
+        return df_widths.iloc[0:0].copy()
+
+    selected = df_connections[df_connections["selected_for_equivalent"]]
+    if selected.empty:
+        return df_widths.iloc[0:0].copy()
+
+    merge_cols = [
+        "image_id",
+        "vessel_type",
+        "connection_index",
+        "inner_circle",
+        "outer_circle",
+        "inner_circle_radius_px",
+        "outer_circle_radius_px",
+    ]
+    return df_widths.merge(selected[merge_cols], on=merge_cols, how="inner")
