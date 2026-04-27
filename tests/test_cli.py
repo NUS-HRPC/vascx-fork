@@ -253,6 +253,12 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
     source_dir = tmp_path / "source"
     output_dir = tmp_path / "metrics"
     _write_minimal_vessel_metric_intermediates(source_dir)
+    (source_dir / "overlays").mkdir()
+    (source_dir / "overlays" / "stale.png").write_text("stale", encoding="utf-8")
+    (source_dir / "vessel_equivalent_overlays").mkdir()
+    (source_dir / "vessel_equivalent_overlays" / "stale.png").write_text(
+        "stale", encoding="utf-8"
+    )
 
     calls: dict[str, object] = {}
 
@@ -341,11 +347,21 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
         fake_measure_vessel_widths_and_tortuosities_between_disc_circle_pair,
     )
 
+    def fake_batch_create_overlays(**kwargs):
+        calls.setdefault("batch_create_overlays", []).append(kwargs)
+        kwargs["output_dir"].mkdir(parents=True, exist_ok=True)
+        (kwargs["output_dir"] / "fresh.txt").write_text("fresh", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "vascx_models.cli.batch_create_overlays", fake_batch_create_overlays
+    )
+
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "\n".join(
             [
                 "overlay:",
+                "  enabled: true",
                 "  circles:",
                 "    - name: 2r",
                 "      diameter: 2.0",
@@ -388,6 +404,15 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
     assert calls["measure_vessel_widths"]["samples_per_connection"] == 4
     assert calls["measure_vessel_widths"]["width_config"].method == "profile"
     assert calls["measure_vessel_widths"]["rgb_dir"] == output_dir / "preprocessed_rgb"
+    assert len(calls["batch_create_overlays"]) == 2
+    assert calls["batch_create_overlays"][0]["output_dir"] == output_dir / "overlays"
+    assert calls["batch_create_overlays"][1]["output_dir"] == (
+        output_dir / "vessel_equivalent_overlays"
+    )
+    assert not (output_dir / "overlays" / "stale.png").exists()
+    assert not (output_dir / "vessel_equivalent_overlays" / "stale.png").exists()
+    assert (output_dir / "overlays" / "fresh.txt").exists()
+    assert (output_dir / "vessel_equivalent_overlays" / "fresh.txt").exists()
     assert (output_dir / "vessel_widths.csv").exists()
     assert pd.read_csv(output_dir / "vessel_widths.csv").iloc[0]["width_px"] == 7.0
     assert (output_dir / "vessel_tortuosities.csv").exists()
@@ -425,6 +450,10 @@ def test_cli_vessel_metrics_uses_timestamped_output_when_omitted(
         "vascx_models.cli._compute_and_save_vessel_metrics",
         fake_compute_and_save_vessel_metrics,
     )
+    monkeypatch.setattr(
+        "vascx_models.cli._refresh_vessel_metric_overlays",
+        lambda **kwargs: calls.setdefault("refresh_overlays", kwargs),
+    )
 
     with monkeypatch.context() as context:
         context.chdir(tmp_path)
@@ -433,6 +462,7 @@ def test_cli_vessel_metrics_uses_timestamped_output_when_omitted(
     assert result.exit_code == 0, result.output
     assert created_output_dir.exists()
     assert (created_output_dir / "vessels" / "sample.png").read_bytes() == b"vessel"
+    assert calls["refresh_overlays"]["output_path"] == created_output_dir
     assert (created_output_dir / "quality.csv").exists()
     assert calls["compute_vessel_metrics"]["output_path"] == created_output_dir
 

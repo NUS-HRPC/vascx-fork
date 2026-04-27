@@ -101,6 +101,92 @@ def _resolve_vessel_width_rgb_dir(output_path: Path, image_source: str) -> Path:
     return output_path / candidate
 
 
+def _load_fovea_overlay_data(fovea_path: Path) -> dict[str, tuple[int, int]] | None:
+    if not fovea_path.exists():
+        return None
+
+    df_fovea = pd.read_csv(fovea_path, index_col=0)
+    if df_fovea.empty:
+        return None
+
+    return {
+        str(image_id): (int(row["x_fovea"]), int(row["y_fovea"]))
+        for image_id, row in df_fovea.iterrows()
+    }
+
+
+def _refresh_vessel_metric_overlays(
+    output_path: Path,
+    df_vessel_widths: pd.DataFrame,
+    df_connection_widths: pd.DataFrame,
+    config_path: Path | None = None,
+) -> None:
+    overlay_path = output_path / "overlays"
+    vessel_equivalent_overlay_path = output_path / "vessel_equivalent_overlays"
+    for overlay_dir in (overlay_path, vessel_equivalent_overlay_path):
+        if overlay_dir.exists():
+            shutil.rmtree(overlay_dir)
+
+    try:
+        app_config = load_app_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not app_config.overlay.enabled:
+        logger.info("Skipping overlay regeneration because overlays are disabled")
+        return
+
+    rgb_dir = output_path / "preprocessed_rgb"
+    if not rgb_dir.is_dir():
+        logger.warning(
+            "Skipping overlay regeneration because %s is missing",
+            rgb_dir,
+        )
+        return
+
+    disc_dir = output_path / "disc"
+    disc_circles_dir = output_path / "disc_circles"
+    circle_dirs = {
+        circle.name: disc_circles_dir / circle.name
+        for circle in app_config.overlay.circles
+        if (disc_circles_dir / circle.name).is_dir()
+    }
+    fovea_data = _load_fovea_overlay_data(output_path / "fovea.csv")
+
+    batch_create_overlays(
+        rgb_dir=rgb_dir,
+        output_dir=overlay_path,
+        av_dir=output_path / "artery_vein",
+        disc_dir=disc_dir if disc_dir.is_dir() else None,
+        vessels_dir=output_path / "vessels",
+        circle_dirs=circle_dirs,
+        vessel_width_data=df_vessel_widths,
+        fovea_data=fovea_data,
+        overlay_config=app_config.overlay,
+    )
+
+    df_selected_equivalent_widths = select_vessel_width_measurements_for_equivalents(
+        df_vessel_widths,
+        df_connection_widths,
+    )
+    equivalent_overlay_config = replace(
+        app_config.overlay,
+        layers=replace(app_config.overlay.layers, vessel_widths=True),
+    )
+    batch_create_overlays(
+        rgb_dir=rgb_dir,
+        output_dir=vessel_equivalent_overlay_path,
+        av_dir=output_path / "artery_vein",
+        disc_dir=disc_dir if disc_dir.is_dir() else None,
+        vessels_dir=output_path / "vessels",
+        circle_dirs=circle_dirs,
+        vessel_width_data=df_selected_equivalent_widths,
+        fovea_data=fovea_data,
+        overlay_config=equivalent_overlay_config,
+    )
+    logger.info("Overlay regeneration complete in %s", output_path)
+
+
 def _compute_and_save_vessel_metrics(
     vessels_path: Path,
     av_path: Path,
@@ -219,11 +305,22 @@ def vessel_metrics(
             output_path=output_path,
         )
     )
-    _compute_and_save_vessel_metrics(
+    (
+        df_vessel_widths,
+        _,
+        df_connection_widths,
+        _,
+    ) = _compute_and_save_vessel_metrics(
         vessels_path=vessels_path,
         av_path=av_path,
         disc_geometry_path=disc_geometry_path,
         output_path=output_path,
+        config_path=config_path,
+    )
+    _refresh_vessel_metric_overlays(
+        output_path=output_path,
+        df_vessel_widths=df_vessel_widths,
+        df_connection_widths=df_connection_widths,
         config_path=config_path,
     )
     logger.info("Vessel metrics complete. Results saved to %s", output_path)
