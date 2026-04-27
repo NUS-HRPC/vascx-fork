@@ -1,17 +1,17 @@
 name: vascx-fork
 channels:
-  - conda-forge
+  - defaults
 dependencies:
-  - python=3.11
+  - click=8
+  - numpy=2
+  - pandas=2
+  - pillow=11
   - pip
-  - numpy=2.*
-  - pandas=2.*
-  - tqdm=4.*
-  - pillow=11.*
-  - scikit-image
-  - click=8.*
-  - pyyaml=6.*
+  - python=3.11
+  - pyyaml=6
+  - tqdm=4
   - pytest
+  - scikit-image
   - pip:
       - huggingface_hub
       - torch==2.11.0
