@@ -21,7 +21,7 @@ overlay:
       diameter: 3.0
       color: "#00FF00"
 vessel_widths:
-  inner_circle: "2r"
+  inner_circle: "2r" # from optic disc center, e.g. "2r" for 2 times the optic disc radius
   outer_circle: "3r"
   samples_per_connection: 5 # -1 measures every interior path pixel, excluding endpoints
   method: "mask"
@@ -46,4 +46,4 @@ vessel_widths:
     tangent_window_px: 10.0
 vessel_tortuosities:
   inner_circle: "2r"
-  outer_circle: "3r"
+  outer_circle: "5r"
