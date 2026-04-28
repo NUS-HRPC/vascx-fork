@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
 
-from .config import OverlayConfig
-from .vessel_paths import skeletonize
+from ..config import OverlayConfig
+from ..geometry.vessel_paths import skeletonize
 
 logger = logging.getLogger(__name__)
 

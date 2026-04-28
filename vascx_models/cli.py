@@ -8,12 +8,18 @@ from rtnls_fundusprep.cli import _run_preprocessing
 
 from . import pipeline as pipeline_ops
 from .config import load_app_config
-from .disc_circles import generate_disc_circles
-from .runtime import configure_runtime_environment
-
-configure_runtime_environment()
-
-from .inference import (
+from .geometry.disc_circles import generate_disc_circles
+from .metrics.vessel_tortuosities import (
+    measure_vessel_tortuosities_between_disc_circle_pair,
+    summarize_vessel_tortuosities,
+)
+from .metrics.vessel_widths import (
+    compute_revised_crx_from_widths,
+    measure_vessel_widths_between_disc_circle_pair,
+    resolve_vessel_width_circle_pair,
+    select_vessel_width_measurements_for_equivalents,
+)
+from .models.inference import (
     available_device_types,
     resolve_device,
     run_fovea_detection,
@@ -21,17 +27,10 @@ from .inference import (
     run_segmentation_disc,
     run_segmentation_vessels_and_av,
 )
-from .utils import batch_create_overlays
-from .vessel_tortuosities import (
-    measure_vessel_tortuosities_between_disc_circle_pair,
-    summarize_vessel_tortuosities,
-)
-from .vessel_widths import (
-    compute_revised_crx_from_widths,
-    measure_vessel_widths_between_disc_circle_pair,
-    resolve_vessel_width_circle_pair,
-    select_vessel_width_measurements_for_equivalents,
-)
+from .overlays.utils import batch_create_overlays
+from .runtime import configure_runtime_environment
+
+configure_runtime_environment()
 
 logger = logging.getLogger(__name__)
 

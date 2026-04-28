@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from vascx_models import inference
+from vascx_models.models import inference
 
 
 def test_resolve_device_auto_prefers_cuda_then_mps_then_cpu(monkeypatch) -> None:

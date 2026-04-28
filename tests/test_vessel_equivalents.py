@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from vascx_models.vessel_widths import (
+from vascx_models.metrics.vessel_widths import (
     VESSEL_WIDTH_COLUMNS,
     compute_revised_crx_from_widths,
     select_vessel_width_measurements_for_equivalents,

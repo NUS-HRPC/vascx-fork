@@ -1,0 +1,2 @@
+"""Overlay rendering helpers."""
+

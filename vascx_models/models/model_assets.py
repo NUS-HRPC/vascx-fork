@@ -81,7 +81,7 @@ def ensure_model_files_present(
     filenames: Sequence[str], *, root: Path | None = None
 ) -> None:
     if root is None:
-        from .runtime import repo_root
+        from ..runtime import repo_root
 
         root = repo_root()
 
@@ -104,7 +104,7 @@ def ensure_model_files_present(
     raise FileNotFoundError(
         "Missing required model weights: "
         f"{missing_display}. Run ./setup.sh or "
-        "`python -m vascx_models.model_assets download --repo-root .`."
+        "`python -m vascx_models.models.model_assets download --repo-root .`."
     )
 
 

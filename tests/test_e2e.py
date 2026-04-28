@@ -10,21 +10,21 @@ from PIL import Image
 from rtnls_fundusprep.cli import _run_preprocessing
 
 from vascx_models.config import AppConfig
-from vascx_models.disc_circles import generate_disc_circles
-from vascx_models.inference import (
+from vascx_models.geometry.disc_circles import generate_disc_circles
+from vascx_models.metrics.vessel_widths import (
+    VESSEL_WIDTH_COLUMNS,
+    measure_vessel_widths_between_disc_circle_pair,
+    resolve_vessel_width_circle_pair,
+)
+from vascx_models.models.inference import (
     run_fovea_detection,
     run_quality_estimation,
     run_segmentation_disc,
     run_segmentation_vessels_and_av,
 )
-from vascx_models.model_assets import missing_model_paths
+from vascx_models.models.model_assets import missing_model_paths
+from vascx_models.overlays.utils import batch_create_overlays
 from vascx_models.runtime import configure_runtime_environment
-from vascx_models.utils import batch_create_overlays
-from vascx_models.vessel_widths import (
-    VESSEL_WIDTH_COLUMNS,
-    measure_vessel_widths_between_disc_circle_pair,
-    resolve_vessel_width_circle_pair,
-)
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
 
-from .config import OverlayCircle
+from ..config import OverlayCircle
 
 logger = logging.getLogger(__name__)
 

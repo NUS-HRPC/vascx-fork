@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from vascx_models.vessel_paths import (
+from vascx_models.geometry.vessel_paths import (
     interpolate_path_point,
     path_cumulative_lengths,
     trace_vessel_paths_between_disc_circle_pair,

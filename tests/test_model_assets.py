@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from vascx_models import model_assets
+from vascx_models.models import model_assets
 
 
 def test_resolve_model_revision_supports_latest_and_tested_aliases() -> None:

@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 
 from vascx_models.config import OverlayCircle
-from vascx_models.disc_circles import generate_disc_circles
+from vascx_models.geometry.disc_circles import generate_disc_circles
 
 
 def _save_mask(path: Path, mask: np.ndarray) -> None:

@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 from vascx_models.config import OverlayCircle
-from vascx_models.vessel_tortuosities import (
+from vascx_models.metrics.vessel_tortuosities import (
     compute_path_tortuosity,
     measure_vessel_tortuosities_between_disc_circle_pair,
     summarize_vessel_tortuosities,

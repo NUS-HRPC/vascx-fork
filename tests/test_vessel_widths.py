@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 from vascx_models.config import OverlayCircle, ProfileWidthConfig, VesselWidthConfig
-from vascx_models.vessel_widths import (
+from vascx_models.metrics.vessel_widths import (
     VESSEL_WIDTH_COLUMNS,
     compute_revised_crx_from_widths,
     measure_vessel_width_at_coordinate,

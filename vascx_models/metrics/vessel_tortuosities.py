@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-from .config import OverlayCircle
-from .vessel_masks import typed_vessel_masks
-from .vessel_paths import trace_vessel_tortuosity_paths_between_disc_circle_pair
+from ..config import OverlayCircle
+from ..geometry.vessel_masks import typed_vessel_masks
+from ..geometry.vessel_paths import trace_vessel_tortuosity_paths_between_disc_circle_pair
 
 VESSEL_TORTUOSITY_COLUMNS = [
     "image_id",

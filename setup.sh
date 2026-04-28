@@ -89,7 +89,7 @@ fi
 download_args=(
   python
   -m
-  vascx_models.model_assets
+  vascx_models.models.model_assets
   download
   --repo-root
   "$REPO_ROOT"
@@ -108,4 +108,4 @@ conda run -n "$CONDA_ENV" --no-capture-output "${download_args[@]}"
 
 echo "Verifying required runtime weights"
 conda run -n "$CONDA_ENV" --no-capture-output \
-  python -m vascx_models.model_assets verify --repo-root "$REPO_ROOT"
+  python -m vascx_models.models.model_assets verify --repo-root "$REPO_ROOT"

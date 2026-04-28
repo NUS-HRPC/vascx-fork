@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from vascx_models.profile_widths import measure_profile_width
+from vascx_models.metrics.profile_widths import measure_profile_width
 
 
 def test_measure_profile_width_detects_dark_vertical_vessel() -> None:

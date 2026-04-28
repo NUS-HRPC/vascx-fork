@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from vascx_models.pvbm_widths import measure_pvbm_mask_width
+from vascx_models.metrics.pvbm_widths import measure_pvbm_mask_width
 
 
 def test_measure_pvbm_mask_width_rectangular_vessel() -> None:

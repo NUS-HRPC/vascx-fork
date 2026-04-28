@@ -7,16 +7,16 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-from .config import OverlayCircle, VesselWidthConfig
-from .profile_widths import measure_profile_width
-from .pvbm_widths import measure_pvbm_mask_width
-from .vessel_masks import typed_vessel_masks
-from .vessel_paths import (
+from ..config import OverlayCircle, VesselWidthConfig
+from ..geometry.vessel_masks import typed_vessel_masks
+from ..geometry.vessel_paths import (
     interpolate_path_point,
     path_cumulative_lengths,
     skeletonize,
     trace_vessel_paths_between_disc_circle_pair,
 )
+from .profile_widths import measure_profile_width
+from .pvbm_widths import measure_pvbm_mask_width
 
 logger = logging.getLogger(__name__)
 

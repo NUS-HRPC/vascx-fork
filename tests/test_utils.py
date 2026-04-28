@@ -9,7 +9,7 @@ from vascx_models.config import (
     OverlayConfig,
     OverlayLayers,
 )
-from vascx_models.utils import create_fundus_overlay
+from vascx_models.overlays.utils import create_fundus_overlay
 
 
 def test_create_fundus_overlay_draws_kept_measurement_segments(tmp_path: Path) -> None:
