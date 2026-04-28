@@ -77,6 +77,9 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
 
     def fake_generate_disc_circles(**kwargs):
         calls["generate_disc_circles"] = kwargs
+        kwargs["circle_output_dir"].mkdir(parents=True, exist_ok=True)
+        for circle in kwargs["circles"]:
+            (kwargs["circle_output_dir"] / circle.name).mkdir(exist_ok=True)
         pd.DataFrame(
             {
                 "x_disc_center": [16.0],
@@ -239,9 +242,17 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
     assert isinstance(measurement_data, pd.DataFrame)
     assert measurement_data.iloc[0]["width_px"] == 7.0
     assert overlay_calls[1]["output_dir"] == output_dir / "vessel_tortuosity_overlays"
+    assert overlay_calls[1]["av_dir"] == output_dir / "artery_vein"
+    assert overlay_calls[1]["disc_dir"] == output_dir / "disc"
     assert overlay_calls[1]["vessels_dir"] == output_dir / "vessels"
+    assert overlay_calls[1]["circle_dirs"]["2r"] == output_dir / "disc_circles" / "2r"
     assert overlay_calls[1]["tortuosity_data"].iloc[0]["tortuosity"] == 1.0
+    assert overlay_calls[1]["fovea_data"] is None
     assert overlay_calls[1]["overlay_config"].colors.vessel == (0, 255, 0)
+    assert overlay_calls[1]["overlay_config"].layers.arteries is True
+    assert overlay_calls[1]["overlay_config"].layers.veins is True
+    assert overlay_calls[1]["overlay_config"].layers.disc is True
+    assert overlay_calls[1]["overlay_config"].layers.fovea is True
     assert overlay_calls[2]["output_dir"] == output_dir / "vessel_width_overlays"
     assert overlay_calls[2]["overlay_config"].layers.vessel_widths is True
     selected_measurement_data = overlay_calls[2]["vessel_width_data"]

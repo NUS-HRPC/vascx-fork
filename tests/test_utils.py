@@ -3,7 +3,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from vascx_models.config import OverlayColors, OverlayConfig, OverlayLayers
+from vascx_models.config import (
+    OverlayCircle,
+    OverlayColors,
+    OverlayConfig,
+    OverlayLayers,
+)
 from vascx_models.utils import create_fundus_overlay
 
 
@@ -123,3 +128,73 @@ def test_create_fundus_overlay_draws_tortuosity_skeleton_and_chord(
     assert tuple(output[22, 20]) == (0, 255, 0)
     assert tuple(output[20, 19]) == (0, 0, 0)
     assert tuple(output[20, 21]) == (0, 0, 0)
+
+
+def test_create_fundus_overlay_draws_tortuosity_on_top_of_other_layers(
+    tmp_path: Path,
+) -> None:
+    rgb_path = tmp_path / "rgb.png"
+    av_path = tmp_path / "av.png"
+    disc_path = tmp_path / "disc.png"
+    vessel_path = tmp_path / "vessel.png"
+    circle_path = tmp_path / "circle.png"
+
+    rgb = np.zeros((100, 100, 3), dtype=np.uint8)
+    Image.fromarray(rgb).save(rgb_path)
+
+    av = np.zeros((100, 100), dtype=np.uint8)
+    av[10, 10] = 1
+    av[10, 11] = 2
+    Image.fromarray(av).save(av_path)
+
+    disc = np.zeros((100, 100), dtype=np.uint8)
+    disc[45:56, 45:56] = 1
+    Image.fromarray(disc).save(disc_path)
+
+    vessel = np.zeros((100, 100), dtype=np.uint8)
+    vessel[45:56, 50] = 1
+    Image.fromarray(vessel).save(vessel_path)
+
+    circle = np.zeros((100, 100), dtype=np.uint8)
+    circle[30, 30] = 1
+    Image.fromarray(circle).save(circle_path)
+
+    output = create_fundus_overlay(
+        rgb_path=str(rgb_path),
+        av_path=str(av_path),
+        disc_path=str(disc_path),
+        vessel_path=str(vessel_path),
+        circle_paths={"2r": str(circle_path)},
+        tortuosity_measurements=[
+            {
+                "x_start": 50.0,
+                "y_start": 45.0,
+                "x_end": 50.0,
+                "y_end": 55.0,
+            }
+        ],
+        fovea_location=(20, 50),
+        overlay_config=OverlayConfig(
+            circles=(OverlayCircle(name="2r", diameter=2.0, color=(9, 8, 7)),),
+            colors=OverlayColors(
+                artery=(255, 0, 0),
+                vein=(0, 0, 255),
+                vessel=(0, 255, 0),
+                disc=(255, 255, 255),
+                fovea=(255, 255, 0),
+                vessel_width=(0, 0, 0),
+            ),
+        ),
+    )
+
+    assert tuple(output[10, 10]) == (255, 0, 0)
+    assert tuple(output[10, 11]) == (0, 0, 255)
+    assert tuple(output[20, 20]) == (0, 0, 0)
+    assert tuple(output[30, 30]) == (9, 8, 7)
+    assert tuple(output[50, 20]) == (255, 255, 0)
+    assert tuple(output[50, 50]) == (0, 255, 0)
+    assert tuple(output[10, 11]) == (0, 0, 255)
+    assert tuple(output[20, 20]) == (0, 0, 0)
+    assert tuple(output[30, 30]) == (9, 8, 7)
+    assert tuple(output[50, 20]) == (255, 255, 0)
+    assert tuple(output[50, 50]) == (0, 255, 0)

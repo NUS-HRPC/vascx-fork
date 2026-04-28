@@ -124,16 +124,6 @@ def create_fundus_overlay(
         )
         output_img[measurement_mask, :] = overlay_config.colors.vessel_width
 
-    if tortuosity_measurements:
-        if vessel_mask is not None:
-            vessel_skeleton_mask = skeletonize(vessel_mask)
-            output_img[vessel_skeleton_mask, :] = overlay_config.colors.vessel
-        tortuosity_mask = _rasterize_line_segments(
-            image_shape=output_img.shape[:2],
-            measurements=tortuosity_measurements,
-        )
-        output_img[tortuosity_mask, :] = overlay_config.colors.vessel
-
     # Convert to PIL image for drawing the fovea marker
     pil_img = Image.fromarray(output_img)
     draw = ImageDraw.Draw(pil_img)
@@ -159,6 +149,16 @@ def create_fundus_overlay(
 
     # Convert back to numpy array
     output_img = np.array(pil_img)
+
+    if tortuosity_measurements:
+        if vessel_mask is not None:
+            vessel_skeleton_mask = skeletonize(vessel_mask)
+            output_img[vessel_skeleton_mask, :] = overlay_config.colors.vessel
+        tortuosity_mask = _rasterize_line_segments(
+            image_shape=output_img.shape[:2],
+            measurements=tortuosity_measurements,
+        )
+        output_img[tortuosity_mask, :] = overlay_config.colors.vessel
 
     # Save output if path provided
     if output_path:

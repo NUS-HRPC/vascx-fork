@@ -133,10 +133,10 @@ def _tortuosity_overlay_config(overlay_config):
         overlay_config,
         layers=replace(
             overlay_config.layers,
-            arteries=False,
-            veins=False,
-            disc=False,
-            fovea=False,
+            arteries=True,
+            veins=True,
+            disc=True,
+            fovea=True,
             vessel_widths=False,
         ),
         colors=replace(overlay_config.colors, vessel=(0, 255, 0)),
@@ -180,8 +180,12 @@ def _render_metric_overlays(
         batch_create_overlays(
             rgb_dir=rgb_dir,
             output_dir=output_path / "vessel_tortuosity_overlays",
+            av_dir=av_dir,
+            disc_dir=disc_dir,
             vessels_dir=vessels_dir,
+            circle_dirs=circle_dirs,
             tortuosity_data=df_vessel_tortuosities,
+            fovea_data=fovea_data,
             overlay_config=_tortuosity_overlay_config(overlay_config),
         )
         logger.info(
