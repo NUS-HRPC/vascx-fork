@@ -180,7 +180,13 @@ def test_load_app_config_accepts_profile_width_options(tmp_path: Path) -> None:
         "\n".join(
             [
                 "vessel_widths:",
+                "  boundary_tolerance_px: 2.0",
                 "  method: profile",
+                "  mask:",
+                "    tangent_window_px: 12.0",
+                "    measurement_step_px: 0.5",
+                "    boundary_refinement_steps: 8",
+                "    trace_padding_px: 3.0",
                 "  profile:",
                 "    image_source: custom_rgb",
                 "    channel: blue",
@@ -199,6 +205,9 @@ def test_load_app_config_accepts_profile_width_options(tmp_path: Path) -> None:
                 "  pvbm_mask:",
                 "    direction_lag_px: 7.0",
                 "    max_asymmetry_px: 1.5",
+                "    trace_step_px: 0.75",
+                "    boundary_adjust_px: 0.25",
+                "    trace_padding_px: 4.0",
             ]
         ),
         encoding="utf-8",
@@ -207,6 +216,11 @@ def test_load_app_config_accepts_profile_width_options(tmp_path: Path) -> None:
     app_config = load_app_config(config_path)
 
     assert app_config.vessel_widths.method == "profile"
+    assert app_config.vessel_widths.boundary_tolerance_px == 2.0
+    assert app_config.vessel_widths.mask.tangent_window_px == 12.0
+    assert app_config.vessel_widths.mask.measurement_step_px == 0.5
+    assert app_config.vessel_widths.mask.boundary_refinement_steps == 8
+    assert app_config.vessel_widths.mask.trace_padding_px == 3.0
     assert app_config.vessel_widths.profile.image_source == "custom_rgb"
     assert app_config.vessel_widths.profile.channel == "blue"
     assert app_config.vessel_widths.profile.sample_step_px == 0.5
@@ -214,6 +228,9 @@ def test_load_app_config_accepts_profile_width_options(tmp_path: Path) -> None:
     assert app_config.vessel_widths.profile.fallback_to_mask is True
     assert app_config.vessel_widths.pvbm_mask.direction_lag_px == 7.0
     assert app_config.vessel_widths.pvbm_mask.max_asymmetry_px == 1.5
+    assert app_config.vessel_widths.pvbm_mask.trace_step_px == 0.75
+    assert app_config.vessel_widths.pvbm_mask.boundary_adjust_px == 0.25
+    assert app_config.vessel_widths.pvbm_mask.trace_padding_px == 4.0
 
 
 def test_load_app_config_rejects_invalid_vessel_width_samples_per_connection(

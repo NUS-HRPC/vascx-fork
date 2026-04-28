@@ -424,8 +424,11 @@ def _compute_and_save_vessel_metrics(
                 outer_circle=width_outer_circle,
                 output_path=vessel_widths_path,
                 samples_per_connection=app_config.vessel_widths.samples_per_connection,
-                tangent_window_px=app_config.vessel_widths.profile.tangent_window_px,
-                measurement_step_px=app_config.vessel_widths.profile.sample_step_px,
+                boundary_tolerance_px=app_config.vessel_widths.boundary_tolerance_px,
+                tangent_window_px=app_config.vessel_widths.mask.tangent_window_px,
+                measurement_step_px=app_config.vessel_widths.mask.measurement_step_px,
+                boundary_refinement_steps=app_config.vessel_widths.mask.boundary_refinement_steps,
+                trace_padding_px=app_config.vessel_widths.mask.trace_padding_px,
                 width_config=app_config.vessel_widths,
                 rgb_dir=rgb_dir,
             )

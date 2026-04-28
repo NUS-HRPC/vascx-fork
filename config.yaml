@@ -28,10 +28,19 @@ vessel_widths:
   inner_circle: "2r" # e.g. "2r" = 2x disc radius
   outer_circle: "3r" # must be larger than inner_circle; circles are auto-derived from these names
   samples_per_connection: 5 # positive integer = evenly spaced samples per vessel; -1 = every interior path pixel
+  boundary_tolerance_px: 1.5 # positive number; annulus boundary tolerance for path selection
   method: "mask" # one of: "mask", "pvbm_mask", "profile"
+  mask:
+    tangent_window_px: 5.0 # positive number; local skeleton window for mask tangent estimation
+    measurement_step_px: 0.25 # positive number; step size when tracing mask boundaries
+    boundary_refinement_steps: 12 # positive integer; binary-search refinement iterations for mask boundaries
+    trace_padding_px: 2.0 # non-negative number; extra search distance beyond the image diagonal
   pvbm_mask:
     direction_lag_px: 6.0 # positive number; used by "pvbm_mask"
     max_asymmetry_px: 1.0 # non-negative number; used by "pvbm_mask"
+    trace_step_px: 1.0 # positive number; step size when tracing integer mask widths
+    boundary_adjust_px: 0.5 # non-negative number; boundary offset added after the last inside step
+    trace_padding_px: 2.0 # non-negative number; extra search distance beyond the image diagonal
   profile:
     image_source: "preprocessed_rgb" # output subdir or absolute RGB path; used by "profile"
     channel: "green" # one of: "red", "green", "blue"
@@ -47,7 +56,6 @@ vessel_widths:
     mask_guardrail_min_ratio: 0.4 # positive number; must be <= mask_guardrail_max_ratio
     mask_guardrail_max_ratio: 2.5 # positive number; must be >= mask_guardrail_min_ratio
     fallback_to_mask: false # true|false; used by "profile"
-    tangent_window_px: 10.0 # positive number; used by "profile"
 
 ######################
 # Vessel Tortuosity  #

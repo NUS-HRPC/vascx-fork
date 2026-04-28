@@ -63,7 +63,9 @@ class VesselWidthConfig:
     inner_circle: str | None = "2r"
     outer_circle: str | None = "3r"
     samples_per_connection: int = 5
+    boundary_tolerance_px: float = 1.5
     method: str = "mask"
+    mask: "MaskWidthConfig" = field(default_factory=lambda: MaskWidthConfig())
     pvbm_mask: "PVBMMaskWidthConfig" = field(
         default_factory=lambda: PVBMMaskWidthConfig()
     )
@@ -81,6 +83,17 @@ class VesselTortuosityConfig:
 class PVBMMaskWidthConfig:
     direction_lag_px: float = 6.0
     max_asymmetry_px: float = 1.0
+    trace_step_px: float = 1.0
+    boundary_adjust_px: float = 0.5
+    trace_padding_px: float = 2.0
+
+
+@dataclass(frozen=True)
+class MaskWidthConfig:
+    tangent_window_px: float = 10.0
+    measurement_step_px: float = 0.25
+    boundary_refinement_steps: int = 12
+    trace_padding_px: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -345,7 +358,9 @@ def _build_vessel_width_config(
         "inner_circle",
         "outer_circle",
         "samples_per_connection",
+        "boundary_tolerance_px",
         "method",
+        "mask",
         "pvbm_mask",
         "profile",
     }
@@ -358,6 +373,12 @@ def _build_vessel_width_config(
         pvbm_mask_raw = {}
     if not isinstance(pvbm_mask_raw, Mapping):
         raise ValueError("'vessel_widths.pvbm_mask' must be a mapping")
+
+    mask_raw = raw_vessel_widths.get("mask", {})
+    if mask_raw is None:
+        mask_raw = {}
+    if not isinstance(mask_raw, Mapping):
+        raise ValueError("'vessel_widths.mask' must be a mapping")
 
     profile_raw = raw_vessel_widths.get("profile", {})
     if profile_raw is None:
@@ -382,11 +403,16 @@ def _build_vessel_width_config(
             raw_vessel_widths.get("samples_per_connection", 5),
             "vessel_widths.samples_per_connection",
         ),
+        boundary_tolerance_px=_coerce_positive_float(
+            raw_vessel_widths.get("boundary_tolerance_px", 1.5),
+            "vessel_widths.boundary_tolerance_px",
+        ),
         method=_coerce_choice(
             raw_vessel_widths.get("method", "mask"),
             "vessel_widths.method",
             {"mask", "pvbm_mask", "profile"},
         ),
+        mask=_build_mask_width_config(mask_raw),
         pvbm_mask=_build_pvbm_mask_width_config(pvbm_mask_raw),
         profile=_build_profile_width_config(profile_raw),
     )
@@ -435,6 +461,9 @@ def _build_pvbm_mask_width_config(
     unsupported_keys = set(raw_pvbm_mask) - {
         "direction_lag_px",
         "max_asymmetry_px",
+        "trace_step_px",
+        "boundary_adjust_px",
+        "trace_padding_px",
     }
     if unsupported_keys:
         unsupported = ", ".join(sorted(str(key) for key in unsupported_keys))
@@ -450,6 +479,51 @@ def _build_pvbm_mask_width_config(
         max_asymmetry_px=_coerce_non_negative_float(
             raw_pvbm_mask.get("max_asymmetry_px", 1.0),
             "vessel_widths.pvbm_mask.max_asymmetry_px",
+        ),
+        trace_step_px=_coerce_positive_float(
+            raw_pvbm_mask.get("trace_step_px", 1.0),
+            "vessel_widths.pvbm_mask.trace_step_px",
+        ),
+        boundary_adjust_px=_coerce_non_negative_float(
+            raw_pvbm_mask.get("boundary_adjust_px", 0.5),
+            "vessel_widths.pvbm_mask.boundary_adjust_px",
+        ),
+        trace_padding_px=_coerce_non_negative_float(
+            raw_pvbm_mask.get("trace_padding_px", 2.0),
+            "vessel_widths.pvbm_mask.trace_padding_px",
+        ),
+    )
+
+
+def _build_mask_width_config(
+    raw_mask: Mapping[str, object],
+) -> MaskWidthConfig:
+    unsupported_keys = set(raw_mask) - {
+        "tangent_window_px",
+        "measurement_step_px",
+        "boundary_refinement_steps",
+        "trace_padding_px",
+    }
+    if unsupported_keys:
+        unsupported = ", ".join(sorted(str(key) for key in unsupported_keys))
+        raise ValueError(f"Unsupported keys in 'vessel_widths.mask': {unsupported}")
+
+    return MaskWidthConfig(
+        tangent_window_px=_coerce_positive_float(
+            raw_mask.get("tangent_window_px", 10.0),
+            "vessel_widths.mask.tangent_window_px",
+        ),
+        measurement_step_px=_coerce_positive_float(
+            raw_mask.get("measurement_step_px", 0.25),
+            "vessel_widths.mask.measurement_step_px",
+        ),
+        boundary_refinement_steps=_coerce_positive_int(
+            raw_mask.get("boundary_refinement_steps", 12),
+            "vessel_widths.mask.boundary_refinement_steps",
+        ),
+        trace_padding_px=_coerce_non_negative_float(
+            raw_mask.get("trace_padding_px", 2.0),
+            "vessel_widths.mask.trace_padding_px",
         ),
     )
 
@@ -472,7 +546,6 @@ def _build_profile_width_config(
         "mask_guardrail_min_ratio",
         "mask_guardrail_max_ratio",
         "fallback_to_mask",
-        "tangent_window_px",
     }
     if unsupported_keys:
         unsupported = ", ".join(sorted(str(key) for key in unsupported_keys))
@@ -554,10 +627,6 @@ def _build_profile_width_config(
         fallback_to_mask=_coerce_bool(
             raw_profile.get("fallback_to_mask", False),
             "vessel_widths.profile.fallback_to_mask",
-        ),
-        tangent_window_px=_coerce_positive_float(
-            raw_profile.get("tangent_window_px", 10.0),
-            "vessel_widths.profile.tangent_window_px",
         ),
     )
 

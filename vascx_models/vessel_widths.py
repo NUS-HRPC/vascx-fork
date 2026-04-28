@@ -20,8 +20,6 @@ from .vessel_paths import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROFILE_DIRECTION_LAG_PX = 6.0
-
 VESSEL_WIDTH_COLUMNS = [
     "image_id",
     "inner_circle",
@@ -190,8 +188,10 @@ def _trace_boundary_distance(
     point_xy: np.ndarray,
     direction_xy: np.ndarray,
     step_px: float,
+    refinement_steps: int,
+    trace_padding_px: float,
 ) -> float:
-    max_distance = float(np.hypot(*vessel_mask.shape)) + 2.0
+    max_distance = float(np.hypot(*vessel_mask.shape)) + float(trace_padding_px)
     current_value = _sample_mask(vessel_mask, point_xy)
     if current_value < 0.5:
         return float("nan")
@@ -204,7 +204,7 @@ def _trace_boundary_distance(
         if _sample_mask(vessel_mask, sample_point) < 0.5:
             low = t_inside
             high = t_outside
-            for _ in range(12):
+            for _ in range(refinement_steps):
                 mid = (low + high) / 2.0
                 mid_point = point_xy + direction_xy * mid
                 if _sample_mask(vessel_mask, mid_point) >= 0.5:
@@ -238,14 +238,30 @@ def _measure_width_along_normal(
     center_xy: np.ndarray,
     tangent_xy: np.ndarray,
     step_px: float,
+    refinement_steps: int,
+    trace_padding_px: float,
 ) -> tuple[float, np.ndarray, np.ndarray]:
     normal_xy = _normal_from_tangent(tangent_xy)
     if normal_xy is None:
         nan_point = _nan_point()
         return float("nan"), nan_point, nan_point
 
-    positive = _trace_boundary_distance(vessel_mask, center_xy, normal_xy, step_px)
-    negative = _trace_boundary_distance(vessel_mask, center_xy, -normal_xy, step_px)
+    positive = _trace_boundary_distance(
+        vessel_mask,
+        center_xy,
+        normal_xy,
+        step_px,
+        refinement_steps,
+        trace_padding_px,
+    )
+    negative = _trace_boundary_distance(
+        vessel_mask,
+        center_xy,
+        -normal_xy,
+        step_px,
+        refinement_steps,
+        trace_padding_px,
+    )
     if np.isnan(positive) or np.isnan(negative):
         nan_point = _nan_point()
         return float("nan"), nan_point, nan_point
@@ -260,6 +276,8 @@ def _measure_mask_width_from_tangent(
     center_xy: np.ndarray,
     tangent_xy: np.ndarray,
     step_px: float,
+    refinement_steps: int,
+    trace_padding_px: float,
     width_method: str = "mask",
 ) -> dict[str, object]:
     measurement = _base_measurement_result(width_method)
@@ -270,8 +288,22 @@ def _measure_mask_width_from_tangent(
 
     measurement["normal_x"] = float(normal_xy[0])
     measurement["normal_y"] = float(normal_xy[1])
-    positive = _trace_boundary_distance(vessel_mask, center_xy, normal_xy, step_px)
-    negative = _trace_boundary_distance(vessel_mask, center_xy, -normal_xy, step_px)
+    positive = _trace_boundary_distance(
+        vessel_mask,
+        center_xy,
+        normal_xy,
+        step_px,
+        refinement_steps,
+        trace_padding_px,
+    )
+    negative = _trace_boundary_distance(
+        vessel_mask,
+        center_xy,
+        -normal_xy,
+        step_px,
+        refinement_steps,
+        trace_padding_px,
+    )
     if np.isnan(positive) or np.isnan(negative):
         measurement["measurement_failure_reason"] = "mask_boundary_not_found"
         return measurement
@@ -300,6 +332,8 @@ def measure_vessel_width_at_coordinate(
     skeleton: Optional[np.ndarray] = None,
     tangent_window_px: float = 10.0,
     measurement_step_px: float = 0.25,
+    boundary_refinement_steps: int = 12,
+    trace_padding_px: float = 2.0,
 ) -> tuple[float, np.ndarray, np.ndarray]:
     """Measure vessel width at an arbitrary coordinate using the local skeleton tangent."""
     skeleton = skeletonize(vessel_mask) if skeleton is None else skeleton
@@ -314,6 +348,8 @@ def measure_vessel_width_at_coordinate(
         center_xy=point_xy,
         tangent_xy=tangent_xy,
         step_px=measurement_step_px,
+        refinement_steps=boundary_refinement_steps,
+        trace_padding_px=trace_padding_px,
     )
     if not bool(measurement["measurement_valid"]):
         nan_point = _nan_point()
@@ -355,6 +391,8 @@ def _measure_sample_width(
     skeleton: np.ndarray,
     tangent_window_px: float,
     measurement_step_px: float,
+    boundary_refinement_steps: int,
+    trace_padding_px: float,
     profile_channel_image: np.ndarray | None,
 ) -> dict[str, object]:
     if width_config.method == "mask":
@@ -364,6 +402,8 @@ def _measure_sample_width(
             skeleton=skeleton,
             tangent_window_px=tangent_window_px,
             measurement_step_px=measurement_step_px,
+            boundary_refinement_steps=boundary_refinement_steps,
+            trace_padding_px=trace_padding_px,
         )
         if np.isnan(width_px):
             measurement = _base_measurement_result("mask")
@@ -391,11 +431,7 @@ def _measure_sample_width(
         )
         return measurement
 
-    lag_px = (
-        width_config.pvbm_mask.direction_lag_px
-        if width_config.method == "pvbm_mask"
-        else DEFAULT_PROFILE_DIRECTION_LAG_PX
-    )
+    lag_px = width_config.pvbm_mask.direction_lag_px
     tangent_xy = _estimate_path_tangent(
         vessel_path_xy,
         cumulative_lengths,
@@ -414,6 +450,9 @@ def _measure_sample_width(
                 center_xy=center_xy,
                 tangent_xy=tangent_xy,
                 max_asymmetry_px=width_config.pvbm_mask.max_asymmetry_px,
+                trace_step_px=width_config.pvbm_mask.trace_step_px,
+                boundary_adjust_px=width_config.pvbm_mask.boundary_adjust_px,
+                trace_padding_px=width_config.pvbm_mask.trace_padding_px,
             )
         )
 
@@ -425,6 +464,8 @@ def _measure_sample_width(
         center_xy=center_xy,
         tangent_xy=tangent_xy,
         step_px=measurement_step_px,
+        refinement_steps=boundary_refinement_steps,
+        trace_padding_px=trace_padding_px,
         width_method="mask",
     )
     if profile_channel_image is None:
@@ -492,6 +533,8 @@ def _width_records_for_image(
     boundary_tolerance_px: float,
     tangent_window_px: float,
     measurement_step_px: float,
+    boundary_refinement_steps: int,
+    trace_padding_px: float,
     width_config: VesselWidthConfig,
     profile_channel_image: np.ndarray | None = None,
 ) -> List[dict]:
@@ -540,6 +583,8 @@ def _width_records_for_image(
                 skeleton=vessel_path.skeleton,
                 tangent_window_px=tangent_window_px,
                 measurement_step_px=measurement_step_px,
+                boundary_refinement_steps=boundary_refinement_steps,
+                trace_padding_px=trace_padding_px,
                 profile_channel_image=profile_channel_image,
             )
             if not bool(measurement["measurement_valid"]):
@@ -630,9 +675,11 @@ def measure_vessel_widths_between_disc_circle_pair(
     outer_circle: OverlayCircle,
     output_path: Optional[Path] = None,
     samples_per_connection: int = 5,
-    boundary_tolerance_px: float = 1.5,
-    tangent_window_px: float = 10.0,
-    measurement_step_px: float = 0.25,
+    boundary_tolerance_px: float | None = None,
+    tangent_window_px: float | None = None,
+    measurement_step_px: float | None = None,
+    boundary_refinement_steps: int | None = None,
+    trace_padding_px: float | None = None,
     width_config: VesselWidthConfig | None = None,
     rgb_dir: Path | None = None,
 ) -> pd.DataFrame:
@@ -645,6 +692,31 @@ def measure_vessel_widths_between_disc_circle_pair(
         raise FileNotFoundError(f"AV directory not found: {av_dir}")
 
     width_config = VesselWidthConfig() if width_config is None else width_config
+    boundary_tolerance_px = (
+        width_config.boundary_tolerance_px
+        if boundary_tolerance_px is None
+        else boundary_tolerance_px
+    )
+    tangent_window_px = (
+        width_config.mask.tangent_window_px
+        if tangent_window_px is None
+        else tangent_window_px
+    )
+    measurement_step_px = (
+        width_config.mask.measurement_step_px
+        if measurement_step_px is None
+        else measurement_step_px
+    )
+    boundary_refinement_steps = (
+        width_config.mask.boundary_refinement_steps
+        if boundary_refinement_steps is None
+        else boundary_refinement_steps
+    )
+    trace_padding_px = (
+        width_config.mask.trace_padding_px
+        if trace_padding_px is None
+        else trace_padding_px
+    )
 
     df_geometry = pd.read_csv(disc_geometry_path, index_col=0)
     width_records: List[dict] = []
@@ -703,6 +775,8 @@ def measure_vessel_widths_between_disc_circle_pair(
                 boundary_tolerance_px=boundary_tolerance_px,
                 tangent_window_px=tangent_window_px,
                 measurement_step_px=measurement_step_px,
+                boundary_refinement_steps=boundary_refinement_steps,
+                trace_padding_px=trace_padding_px,
                 width_config=width_config,
                 profile_channel_image=profile_channel_image,
             )

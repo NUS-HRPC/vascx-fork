@@ -177,7 +177,13 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
                 "  inner_circle: 2r",
                 "  outer_circle: 3r",
                 "  samples_per_connection: 4",
+                "  boundary_tolerance_px: 2.5",
                 "  method: profile",
+                "  mask:",
+                "    tangent_window_px: 11.0",
+                "    measurement_step_px: 0.5",
+                "    boundary_refinement_steps: 9",
+                "    trace_padding_px: 3.0",
                 "  profile:",
                 "    image_source: preprocessed_rgb",
                 "    fallback_to_mask: true",
@@ -223,7 +229,13 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
         output_dir / "vessel_tortuosities.csv"
     )
     assert calls["measure_vessel_widths"]["samples_per_connection"] == 4
+    assert calls["measure_vessel_widths"]["boundary_tolerance_px"] == 2.5
+    assert calls["measure_vessel_widths"]["tangent_window_px"] == 11.0
+    assert calls["measure_vessel_widths"]["measurement_step_px"] == 0.5
+    assert calls["measure_vessel_widths"]["boundary_refinement_steps"] == 9
+    assert calls["measure_vessel_widths"]["trace_padding_px"] == 3.0
     assert calls["measure_vessel_widths"]["width_config"].method == "profile"
+    assert calls["measure_vessel_widths"]["width_config"].mask.tangent_window_px == 11.0
     assert calls["measure_vessel_widths"]["rgb_dir"] == output_dir / "preprocessed_rgb"
     assert calls["generate_disc_circles"]["circles"][0].name == "2r"
     assert calls["generate_disc_circles"]["circles"][0].color == (18, 52, 86)

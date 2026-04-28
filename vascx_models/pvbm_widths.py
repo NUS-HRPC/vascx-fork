@@ -30,6 +30,9 @@ def _trace_integer_half_width(
     vessel_mask: np.ndarray,
     center_xy: np.ndarray,
     direction_xy: np.ndarray,
+    trace_step_px: float,
+    boundary_adjust_px: float,
+    trace_padding_px: float,
 ) -> float:
     center_coordinate = _rounded_coordinate(center_xy)
     if not _mask_contains(vessel_mask, center_coordinate):
@@ -37,16 +40,18 @@ def _trace_integer_half_width(
 
     last_inside_distance = 0.0
     visited_coordinates = {center_coordinate}
-    max_steps = int(math.ceil(float(np.hypot(*vessel_mask.shape)))) + 2
+    max_distance = float(np.hypot(*vessel_mask.shape)) + float(trace_padding_px)
+    max_steps = int(math.ceil(max_distance / trace_step_px))
 
     for step in range(1, max_steps + 1):
-        coordinate = _rounded_coordinate(center_xy + direction_xy * float(step))
+        distance_px = float(step) * trace_step_px
+        coordinate = _rounded_coordinate(center_xy + direction_xy * distance_px)
         if coordinate in visited_coordinates:
             continue
         visited_coordinates.add(coordinate)
         if not _mask_contains(vessel_mask, coordinate):
-            return last_inside_distance + 0.5
-        last_inside_distance = float(step)
+            return last_inside_distance + boundary_adjust_px
+        last_inside_distance = distance_px
 
     return float("nan")
 
@@ -56,6 +61,9 @@ def measure_pvbm_mask_width(
     center_xy: np.ndarray,
     tangent_xy: np.ndarray,
     max_asymmetry_px: float = 1.0,
+    trace_step_px: float = 1.0,
+    boundary_adjust_px: float = 0.5,
+    trace_padding_px: float = 2.0,
 ) -> dict[str, object]:
     normal_xy = _normal_from_tangent(tangent_xy)
     result = {
@@ -78,8 +86,22 @@ def measure_pvbm_mask_width(
     result["normal_x"] = float(normal_xy[0])
     result["normal_y"] = float(normal_xy[1])
 
-    positive = _trace_integer_half_width(vessel_mask, center_xy, normal_xy)
-    negative = _trace_integer_half_width(vessel_mask, center_xy, -normal_xy)
+    positive = _trace_integer_half_width(
+        vessel_mask,
+        center_xy,
+        normal_xy,
+        trace_step_px,
+        boundary_adjust_px,
+        trace_padding_px,
+    )
+    negative = _trace_integer_half_width(
+        vessel_mask,
+        center_xy,
+        -normal_xy,
+        trace_step_px,
+        boundary_adjust_px,
+        trace_padding_px,
+    )
     if np.isnan(positive) or np.isnan(negative):
         result["measurement_failure_reason"] = "pvbm_mask_boundary_not_found"
         return result
