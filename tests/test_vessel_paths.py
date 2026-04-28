@@ -5,6 +5,7 @@ from vascx_models.vessel_paths import (
     interpolate_path_point,
     path_cumulative_lengths,
     trace_vessel_paths_between_disc_circle_pair,
+    trace_vessel_tortuosity_paths_between_disc_circle_pair,
 )
 
 
@@ -101,3 +102,25 @@ def test_trace_vessel_paths_between_disc_circle_pair_keeps_inner_trunk_for_fork(
     assert paths[0].path_xy[:, 1].tolist() == pytest.approx(
         [130.0, 131.0, 132.0, 133.0, 134.0, 135.0]
     )
+
+
+def test_trace_vessel_tortuosity_paths_between_disc_circle_pair_keeps_one_to_many_paths() -> (
+    None
+):
+    height = width = 180
+    vessel = np.zeros((height, width), dtype=bool)
+    vessel[130:136, 90] = True
+    vessel[135, 40:141] = True
+    disc_center_xy = np.array([90.0, 90.0], dtype=float)
+
+    paths = trace_vessel_tortuosity_paths_between_disc_circle_pair(
+        vessel_mask=vessel,
+        disc_center_xy=disc_center_xy,
+        inner_radius_px=40.0,
+        outer_radius_px=60.0,
+        boundary_tolerance_px=1.5,
+    )
+
+    assert len(paths) == 2
+    assert sorted(path.path_xy[-1, 0] for path in paths) == [51.0, 129.0]
+    assert all(path.path_xy[0].tolist() == [90.0, 130.0] for path in paths)

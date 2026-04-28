@@ -44,3 +44,6 @@ vessel_widths:
     mask_guardrail_max_ratio: 2.5
     fallback_to_mask: false
     tangent_window_px: 10.0
+vessel_tortuosities:
+  inner_circle: "2r"
+  outer_circle: "3r"

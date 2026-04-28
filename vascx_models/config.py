@@ -67,6 +67,12 @@ class VesselWidthConfig:
 
 
 @dataclass(frozen=True)
+class VesselTortuosityConfig:
+    inner_circle: str | None = None
+    outer_circle: str | None = None
+
+
+@dataclass(frozen=True)
 class PVBMMaskWidthConfig:
     direction_lag_px: float = 6.0
     max_asymmetry_px: float = 1.0
@@ -95,6 +101,9 @@ class ProfileWidthConfig:
 class AppConfig:
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     vessel_widths: VesselWidthConfig = field(default_factory=VesselWidthConfig)
+    vessel_tortuosities: VesselTortuosityConfig = field(
+        default_factory=VesselTortuosityConfig
+    )
     source_path: Path | None = None
 
 
@@ -158,6 +167,12 @@ def load_app_config(config_path: str | Path | None = None) -> AppConfig:
     if not isinstance(vessel_widths_raw, dict):
         raise ValueError("'vessel_widths' must be a mapping")
 
+    vessel_tortuosities_raw = raw_config.get("vessel_tortuosities", {})
+    if vessel_tortuosities_raw is None:
+        vessel_tortuosities_raw = {}
+    if not isinstance(vessel_tortuosities_raw, dict):
+        raise ValueError("'vessel_tortuosities' must be a mapping")
+
     raw_circles = overlay_raw.get("circles", None)
     if raw_circles is None:
         circles = default_overlay_circles()
@@ -172,6 +187,7 @@ def load_app_config(config_path: str | Path | None = None) -> AppConfig:
             circles=circles,
         ),
         vessel_widths=_build_vessel_width_config(vessel_widths_raw),
+        vessel_tortuosities=_build_vessel_tortuosity_config(vessel_tortuosities_raw),
         source_path=resolved_path,
     )
 
@@ -307,6 +323,29 @@ def _build_vessel_width_config(
         ),
         pvbm_mask=_build_pvbm_mask_width_config(pvbm_mask_raw),
         profile=_build_profile_width_config(profile_raw),
+    )
+
+
+def _build_vessel_tortuosity_config(
+    raw_vessel_tortuosities: Mapping[str, object],
+) -> VesselTortuosityConfig:
+    unsupported_keys = set(raw_vessel_tortuosities) - {
+        "inner_circle",
+        "outer_circle",
+    }
+    if unsupported_keys:
+        unsupported = ", ".join(sorted(str(key) for key in unsupported_keys))
+        raise ValueError(f"Unsupported keys in 'vessel_tortuosities': {unsupported}")
+
+    return VesselTortuosityConfig(
+        inner_circle=_coerce_optional_string(
+            raw_vessel_tortuosities.get("inner_circle"),
+            "vessel_tortuosities.inner_circle",
+        ),
+        outer_circle=_coerce_optional_string(
+            raw_vessel_tortuosities.get("outer_circle"),
+            "vessel_tortuosities.outer_circle",
+        ),
     )
 
 

@@ -86,7 +86,7 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
             index=["sample"],
         ).to_csv(kwargs["measurements_path"])
 
-    def fake_measure_vessel_widths_and_tortuosities_between_disc_circle_pair(**kwargs):
+    def fake_measure_vessel_widths_between_disc_circle_pair(**kwargs):
         calls["measure_vessel_widths"] = kwargs
         df = pd.DataFrame(
             [
@@ -110,6 +110,10 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
             ]
         )
         df.to_csv(kwargs["output_path"], index=False)
+        return df
+
+    def fake_measure_vessel_tortuosities_between_disc_circle_pair(**kwargs):
+        calls["measure_vessel_tortuosities"] = kwargs
         df_tortuosities = pd.DataFrame(
             [
                 {
@@ -130,8 +134,8 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
                 }
             ]
         )
-        df_tortuosities.to_csv(kwargs["tortuosity_output_path"], index=False)
-        return df, df_tortuosities
+        df_tortuosities.to_csv(kwargs["output_path"], index=False)
+        return df_tortuosities
 
     def fake_batch_create_overlays(**kwargs):
         calls.setdefault("batch_create_overlays", []).append(kwargs)
@@ -140,8 +144,12 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
         "vascx_models.cli.generate_disc_circles", fake_generate_disc_circles
     )
     monkeypatch.setattr(
-        "vascx_models.cli.measure_vessel_widths_and_tortuosities_between_disc_circle_pair",
-        fake_measure_vessel_widths_and_tortuosities_between_disc_circle_pair,
+        "vascx_models.cli.measure_vessel_widths_between_disc_circle_pair",
+        fake_measure_vessel_widths_between_disc_circle_pair,
+    )
+    monkeypatch.setattr(
+        "vascx_models.cli.measure_vessel_tortuosities_between_disc_circle_pair",
+        fake_measure_vessel_tortuosities_between_disc_circle_pair,
     )
     monkeypatch.setattr(
         "vascx_models.cli.batch_create_overlays", fake_batch_create_overlays
@@ -166,6 +174,9 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
                 "    - name: 3r",
                 "      diameter: 3.0",
                 "      color: '#00FF00'",
+                "    - name: 5r",
+                "      diameter: 5.0",
+                "      color: '#00FF00'",
                 "vessel_widths:",
                 "  inner_circle: 2r",
                 "  outer_circle: 3r",
@@ -174,6 +185,9 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
                 "  profile:",
                 "    image_source: preprocessed_rgb",
                 "    fallback_to_mask: true",
+                "vessel_tortuosities:",
+                "  inner_circle: 2r",
+                "  outer_circle: 5r",
             ]
         ),
         encoding="utf-8",
@@ -206,7 +220,9 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
     assert calls["run_segmentation_disc"]["disc_color"] == (221, 221, 221)
     assert calls["measure_vessel_widths"]["inner_circle"].name == "2r"
     assert calls["measure_vessel_widths"]["outer_circle"].name == "3r"
-    assert calls["measure_vessel_widths"]["tortuosity_output_path"] == (
+    assert calls["measure_vessel_tortuosities"]["inner_circle"].name == "2r"
+    assert calls["measure_vessel_tortuosities"]["outer_circle"].name == "5r"
+    assert calls["measure_vessel_tortuosities"]["output_path"] == (
         output_dir / "vessel_tortuosities.csv"
     )
     assert calls["measure_vessel_widths"]["samples_per_connection"] == 4
@@ -239,12 +255,10 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
         "vessel_ids_used",
         "mean_widths_used_px",
         "equivalent_px",
-        "mean_tortuosity_used",
     ]
     assert vessel_equivalents.iloc[0]["metric"] == "CRAE"
     assert vessel_equivalents.iloc[0]["vessel_ids_used"] == "artery_1"
     assert vessel_equivalents.iloc[0]["n_vessels_used"] == 1
-    assert vessel_equivalents.iloc[0]["mean_tortuosity_used"] == 1.0
 
 
 def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
@@ -266,7 +280,7 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
 
     calls: dict[str, object] = {}
 
-    def fake_measure_vessel_widths_and_tortuosities_between_disc_circle_pair(**kwargs):
+    def fake_measure_vessel_widths_between_disc_circle_pair(**kwargs):
         calls["measure_vessel_widths"] = kwargs
         df_widths = pd.DataFrame(
             [
@@ -306,6 +320,11 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
                 },
             ]
         )
+        df_widths.to_csv(kwargs["output_path"], index=False)
+        return df_widths
+
+    def fake_measure_vessel_tortuosities_between_disc_circle_pair(**kwargs):
+        calls["measure_vessel_tortuosities"] = kwargs
         df_tortuosities = pd.DataFrame(
             [
                 {
@@ -342,13 +361,16 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
                 },
             ]
         )
-        df_widths.to_csv(kwargs["output_path"], index=False)
-        df_tortuosities.to_csv(kwargs["tortuosity_output_path"], index=False)
-        return df_widths, df_tortuosities
+        df_tortuosities.to_csv(kwargs["output_path"], index=False)
+        return df_tortuosities
 
     monkeypatch.setattr(
-        "vascx_models.cli.measure_vessel_widths_and_tortuosities_between_disc_circle_pair",
-        fake_measure_vessel_widths_and_tortuosities_between_disc_circle_pair,
+        "vascx_models.cli.measure_vessel_widths_between_disc_circle_pair",
+        fake_measure_vessel_widths_between_disc_circle_pair,
+    )
+    monkeypatch.setattr(
+        "vascx_models.cli.measure_vessel_tortuosities_between_disc_circle_pair",
+        fake_measure_vessel_tortuosities_between_disc_circle_pair,
     )
 
     def fake_generate_disc_circles(**kwargs):
@@ -436,6 +458,12 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
     assert calls["measure_vessel_widths"]["samples_per_connection"] == 4
     assert calls["measure_vessel_widths"]["width_config"].method == "profile"
     assert calls["measure_vessel_widths"]["rgb_dir"] == output_dir / "preprocessed_rgb"
+    assert calls["measure_vessel_tortuosities"]["vessels_dir"] == (
+        output_dir / "vessels"
+    )
+    assert calls["measure_vessel_tortuosities"]["av_dir"] == (
+        output_dir / "artery_vein"
+    )
     assert len(calls["batch_create_overlays"]) == 2
     assert calls["batch_create_overlays"][0]["output_dir"] == output_dir / "overlays"
     assert calls["batch_create_overlays"][1]["output_dir"] == (
@@ -450,7 +478,7 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
     assert (output_dir / "vessel_tortuosities.csv").exists()
     equivalents = pd.read_csv(output_dir / "vessel_equivalents.csv")
     assert equivalents.iloc[0]["metric"] == "CRAE"
-    assert equivalents.iloc[0]["mean_tortuosity_used"] == 1.1
+    assert "mean_tortuosity_used" not in equivalents.columns
 
 
 def test_cli_vessel_metrics_uses_timestamped_output_when_omitted(

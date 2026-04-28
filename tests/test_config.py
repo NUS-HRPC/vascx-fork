@@ -95,6 +95,9 @@ def test_load_app_config_accepts_vessel_width_sampling_options(tmp_path: Path) -
                 "  inner_circle: 2r",
                 "  outer_circle: 3r",
                 "  samples_per_connection: 4",
+                "vessel_tortuosities:",
+                "  inner_circle: 3r",
+                "  outer_circle: 5r",
             ]
         ),
         encoding="utf-8",
@@ -109,6 +112,8 @@ def test_load_app_config_accepts_vessel_width_sampling_options(tmp_path: Path) -
     assert app_config.vessel_widths.outer_circle == "3r"
     assert app_config.vessel_widths.samples_per_connection == 4
     assert app_config.vessel_widths.method == "mask"
+    assert app_config.vessel_tortuosities.inner_circle == "3r"
+    assert app_config.vessel_tortuosities.outer_circle == "5r"
 
 
 def test_load_app_config_accepts_profile_width_options(tmp_path: Path) -> None:

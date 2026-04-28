@@ -24,9 +24,10 @@ from .inference import (
     run_segmentation_vessels_and_av,
 )
 from .utils import batch_create_overlays
+from .vessel_tortuosities import measure_vessel_tortuosities_between_disc_circle_pair
 from .vessel_widths import (
     compute_revised_crx_from_widths,
-    measure_vessel_widths_and_tortuosities_between_disc_circle_pair,
+    measure_vessel_widths_between_disc_circle_pair,
     resolve_vessel_width_circle_pair,
     select_vessel_width_measurements_for_equivalents,
 )
@@ -226,10 +227,17 @@ def _compute_and_save_vessel_metrics(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     try:
         app_config = load_app_config(config_path)
-        inner_circle, outer_circle = resolve_vessel_width_circle_pair(
+        width_inner_circle, width_outer_circle = resolve_vessel_width_circle_pair(
             app_config.overlay.circles,
             inner_circle_name=app_config.vessel_widths.inner_circle,
             outer_circle_name=app_config.vessel_widths.outer_circle,
+        )
+        tortuosity_inner_circle, tortuosity_outer_circle = (
+            resolve_vessel_width_circle_pair(
+                app_config.overlay.circles,
+                inner_circle_name=app_config.vessel_tortuosities.inner_circle,
+                outer_circle_name=app_config.vessel_tortuosities.outer_circle,
+            )
         )
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -246,34 +254,43 @@ def _compute_and_save_vessel_metrics(
     vessel_equivalents_path = output_path / "vessel_equivalents.csv"
 
     logger.info(
-        "Measuring vessel metrics between %s and %s with %d samples per connection using %s",
-        inner_circle.name,
-        outer_circle.name,
+        "Measuring vessel widths between %s and %s with %d samples per connection using %s",
+        width_inner_circle.name,
+        width_outer_circle.name,
         app_config.vessel_widths.samples_per_connection,
         app_config.vessel_widths.method,
     )
     try:
-        df_vessel_widths, df_vessel_tortuosities = (
-            measure_vessel_widths_and_tortuosities_between_disc_circle_pair(
-                vessels_dir=vessels_path,
-                av_dir=av_path,
-                disc_geometry_path=disc_geometry_path,
-                inner_circle=inner_circle,
-                outer_circle=outer_circle,
-                output_path=vessel_widths_path,
-                tortuosity_output_path=vessel_tortuosities_path,
-                samples_per_connection=app_config.vessel_widths.samples_per_connection,
-                tangent_window_px=app_config.vessel_widths.profile.tangent_window_px,
-                measurement_step_px=app_config.vessel_widths.profile.sample_step_px,
-                width_config=app_config.vessel_widths,
-                rgb_dir=rgb_dir,
-            )
+        df_vessel_widths = measure_vessel_widths_between_disc_circle_pair(
+            vessels_dir=vessels_path,
+            av_dir=av_path,
+            disc_geometry_path=disc_geometry_path,
+            inner_circle=width_inner_circle,
+            outer_circle=width_outer_circle,
+            output_path=vessel_widths_path,
+            samples_per_connection=app_config.vessel_widths.samples_per_connection,
+            tangent_window_px=app_config.vessel_widths.profile.tangent_window_px,
+            measurement_step_px=app_config.vessel_widths.profile.sample_step_px,
+            width_config=app_config.vessel_widths,
+            rgb_dir=rgb_dir,
+        )
+        logger.info(
+            "Measuring vessel tortuosities between %s and %s",
+            tortuosity_inner_circle.name,
+            tortuosity_outer_circle.name,
+        )
+        df_vessel_tortuosities = measure_vessel_tortuosities_between_disc_circle_pair(
+            vessels_dir=vessels_path,
+            av_dir=av_path,
+            disc_geometry_path=disc_geometry_path,
+            inner_circle=tortuosity_inner_circle,
+            outer_circle=tortuosity_outer_circle,
+            output_path=vessel_tortuosities_path,
         )
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     df_connection_widths, df_vessel_equivalents = compute_revised_crx_from_widths(
-        df_vessel_widths,
-        df_tortuosities=df_vessel_tortuosities,
+        df_vessel_widths
     )
     df_vessel_equivalents.to_csv(vessel_equivalents_path, index=False)
     logger.info("Vessel equivalents saved to %s", vessel_equivalents_path)
@@ -575,7 +592,7 @@ def run(
         )
         logger.info("Disc circles saved to %s", disc_circles_path)
 
-    # Step 5: Measure vessel widths along simple vessel paths between the configured circle pair
+    # Step 5: Measure width and tortuosity outputs through separate vessel metric flows.
     df_vessel_widths = None
     df_selected_equivalent_widths = None
     if disc and vessels:

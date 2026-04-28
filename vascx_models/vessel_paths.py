@@ -425,3 +425,114 @@ def trace_vessel_paths_between_disc_circle_pair(
             )
 
     return vessel_paths
+
+
+def _simple_paths_from_inner_to_outer(
+    graph: dict[tuple[int, int], list[tuple[int, int]]],
+    start: tuple[int, int],
+    outer_nodes: set[tuple[int, int]],
+) -> list[np.ndarray]:
+    paths: list[np.ndarray] = []
+    stack: list[
+        tuple[tuple[int, int], tuple[tuple[int, int], ...], frozenset[tuple[int, int]]]
+    ] = [(start, (start,), frozenset((start,)))]
+
+    while stack:
+        current, path, visited = stack.pop()
+        if current in outer_nodes and current != start:
+            paths.append(np.asarray(path, dtype=float))
+            continue
+
+        for neighbor in sorted(graph[current], reverse=True):
+            if neighbor in visited:
+                continue
+            stack.append((neighbor, path + (neighbor,), visited | {neighbor}))
+
+    return paths
+
+
+def trace_vessel_tortuosity_paths_between_disc_circle_pair(
+    vessel_mask: np.ndarray,
+    disc_center_xy: np.ndarray,
+    inner_radius_px: float,
+    outer_radius_px: float,
+    boundary_tolerance_px: float,
+) -> list[VesselPath]:
+    """Return full inner-to-outer skeleton paths, including 1-to-n fork paths."""
+    if not np.any(vessel_mask):
+        return []
+    if outer_radius_px <= inner_radius_px:
+        raise ValueError("outer_radius_px must be larger than inner_radius_px")
+
+    skeleton = skeletonize(vessel_mask)
+    if not np.any(skeleton):
+        return []
+
+    yy, xx = np.indices(vessel_mask.shape, dtype=float)
+    distances = np.hypot(xx - disc_center_xy[0], yy - disc_center_xy[1])
+    annulus_mask = (
+        skeleton & (distances >= inner_radius_px) & (distances <= outer_radius_px)
+    )
+    components = connected_components(annulus_mask)
+
+    vessel_paths: list[VesselPath] = []
+    connection_index = 0
+    for component in components:
+        neighbors = component_neighbor_map(component)
+        boundary_roles = boundary_roles_for_component(
+            component=component,
+            distances=distances,
+            inner_radius_px=inner_radius_px,
+            outer_radius_px=outer_radius_px,
+            boundary_tolerance_px=boundary_tolerance_px,
+        )
+        inner_nodes = {
+            node for node, role in boundary_roles.items() if role == "inner"
+        }
+        outer_nodes = {
+            node for node, role in boundary_roles.items() if role == "outer"
+        }
+        if not inner_nodes or not outer_nodes:
+            continue
+
+        active_nodes = prune_to_inner_outer_nodes(neighbors, boundary_roles)
+        active_graph = active_subgraph(neighbors, active_nodes)
+        for group in connected_node_groups(active_graph):
+            group_inner_nodes = sorted(inner_nodes & group)
+            group_outer_nodes = outer_nodes & group
+            if not group_inner_nodes or not group_outer_nodes:
+                continue
+
+            group_graph = active_subgraph(active_graph, group)
+            for start in group_inner_nodes:
+                for path_yx in _simple_paths_from_inner_to_outer(
+                    group_graph,
+                    start=start,
+                    outer_nodes=group_outer_nodes,
+                ):
+                    if len(path_yx) > 1:
+                        keep = np.concatenate(
+                            ([True], np.any(np.diff(path_yx, axis=0) != 0, axis=1))
+                        )
+                        path_yx = path_yx[keep]
+                    path_xy = path_yx[:, ::-1]
+                    cumulative_lengths = path_cumulative_lengths(path_xy)
+                    if len(cumulative_lengths) == 0 or cumulative_lengths[-1] <= 0.0:
+                        continue
+
+                    path_skeleton = np.zeros_like(skeleton, dtype=bool)
+                    segment_rows = path_yx[:, 0].astype(int)
+                    segment_cols = path_yx[:, 1].astype(int)
+                    path_skeleton[segment_rows, segment_cols] = True
+
+                    connection_index += 1
+                    vessel_paths.append(
+                        VesselPath(
+                            connection_index=connection_index,
+                            path_xy=path_xy,
+                            path_yx=path_yx,
+                            skeleton=path_skeleton,
+                        )
+                    )
+
+    return vessel_paths

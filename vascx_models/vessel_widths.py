@@ -16,7 +16,6 @@ from .vessel_paths import (
     skeletonize,
     trace_vessel_paths_between_disc_circle_pair,
 )
-from .vessel_tortuosities import VESSEL_TORTUOSITY_COLUMNS, vessel_tortuosity_record
 
 logger = logging.getLogger(__name__)
 
@@ -490,7 +489,7 @@ def _typed_vessel_masks(
     return artery_mask, vein_mask
 
 
-def _path_records_for_image(
+def _width_records_for_image(
     image_id: str,
     vessel_mask: np.ndarray,
     vessel_type: str,
@@ -504,9 +503,9 @@ def _path_records_for_image(
     measurement_step_px: float,
     width_config: VesselWidthConfig,
     profile_channel_image: np.ndarray | None = None,
-) -> tuple[List[dict], List[dict]]:
+) -> List[dict]:
     if not np.any(vessel_mask):
-        return [], []
+        return []
 
     if samples_per_connection == 0:
         raise ValueError("samples_per_connection must be non-zero")
@@ -525,7 +524,6 @@ def _path_records_for_image(
     )
 
     width_records: List[dict] = []
-    tortuosity_records: List[dict] = []
     for vessel_path in vessel_paths:
         cumulative_lengths = path_cumulative_lengths(vessel_path.path_xy)
         sample_targets = _sample_targets_for_path(
@@ -587,20 +585,8 @@ def _path_records_for_image(
         if len(component_records) != len(sample_targets):
             continue
         width_records.extend(component_records)
-        tortuosity_records.append(
-            vessel_tortuosity_record(
-                image_id=image_id,
-                vessel_type=vessel_type,
-                inner_circle=inner_circle,
-                outer_circle=outer_circle,
-                inner_radius_px=inner_radius_px,
-                outer_radius_px=outer_radius_px,
-                connection_index=vessel_path.connection_index,
-                path_xy=vessel_path.path_xy,
-            )
-        )
 
-    return width_records, tortuosity_records
+    return width_records
 
 
 def resolve_vessel_width_circle_pair(
@@ -645,22 +631,21 @@ def resolve_vessel_width_circle_pair(
     return inner_circle, outer_circle
 
 
-def measure_vessel_widths_and_tortuosities_between_disc_circle_pair(
+def measure_vessel_widths_between_disc_circle_pair(
     vessels_dir: Path,
     av_dir: Path,
     disc_geometry_path: Path,
     inner_circle: OverlayCircle,
     outer_circle: OverlayCircle,
     output_path: Optional[Path] = None,
-    tortuosity_output_path: Optional[Path] = None,
     samples_per_connection: int = 5,
     boundary_tolerance_px: float = 1.5,
     tangent_window_px: float = 10.0,
     measurement_step_px: float = 0.25,
     width_config: VesselWidthConfig | None = None,
     rgb_dir: Path | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Measure vessel widths and path tortuosities between two circles."""
+) -> pd.DataFrame:
+    """Measure artery and vein widths separately at interior points between two circles."""
     if not disc_geometry_path.exists():
         raise FileNotFoundError(f"Disc geometry file not found: {disc_geometry_path}")
     if not vessels_dir.exists():
@@ -672,7 +657,6 @@ def measure_vessel_widths_and_tortuosities_between_disc_circle_pair(
 
     df_geometry = pd.read_csv(disc_geometry_path, index_col=0)
     width_records: List[dict] = []
-    tortuosity_records: List[dict] = []
 
     for image_id, row in df_geometry.iterrows():
         if (
@@ -714,7 +698,7 @@ def measure_vessel_widths_and_tortuosities_between_disc_circle_pair(
 
         artery_mask, vein_mask = _typed_vessel_masks(vessel_mask, av_mask)
         for typed_mask, vessel_type in ((artery_mask, "artery"), (vein_mask, "vein")):
-            image_width_records, image_tortuosity_records = _path_records_for_image(
+            image_width_records = _width_records_for_image(
                 image_id=image_id,
                 vessel_mask=typed_mask,
                 vessel_type=vessel_type,
@@ -732,54 +716,14 @@ def measure_vessel_widths_and_tortuosities_between_disc_circle_pair(
                 profile_channel_image=profile_channel_image,
             )
             width_records.extend(image_width_records)
-            tortuosity_records.extend(image_tortuosity_records)
 
     df_widths = pd.DataFrame.from_records(
         width_records,
         columns=VESSEL_WIDTH_COLUMNS,
     )
-    df_tortuosities = pd.DataFrame.from_records(
-        tortuosity_records,
-        columns=VESSEL_TORTUOSITY_COLUMNS,
-    )
     if output_path is not None:
         df_widths.to_csv(output_path, index=False)
         logger.info("Vessel path width measurements saved to %s", output_path)
-    if tortuosity_output_path is not None:
-        df_tortuosities.to_csv(tortuosity_output_path, index=False)
-        logger.info("Vessel path tortuosities saved to %s", tortuosity_output_path)
-    return df_widths, df_tortuosities
-
-
-def measure_vessel_widths_between_disc_circle_pair(
-    vessels_dir: Path,
-    av_dir: Path,
-    disc_geometry_path: Path,
-    inner_circle: OverlayCircle,
-    outer_circle: OverlayCircle,
-    output_path: Optional[Path] = None,
-    samples_per_connection: int = 5,
-    boundary_tolerance_px: float = 1.5,
-    tangent_window_px: float = 10.0,
-    measurement_step_px: float = 0.25,
-    width_config: VesselWidthConfig | None = None,
-    rgb_dir: Path | None = None,
-) -> pd.DataFrame:
-    """Measure artery and vein widths separately at interior points between two circles."""
-    df_widths, _ = measure_vessel_widths_and_tortuosities_between_disc_circle_pair(
-        vessels_dir=vessels_dir,
-        av_dir=av_dir,
-        disc_geometry_path=disc_geometry_path,
-        inner_circle=inner_circle,
-        outer_circle=outer_circle,
-        output_path=output_path,
-        samples_per_connection=samples_per_connection,
-        boundary_tolerance_px=boundary_tolerance_px,
-        tangent_window_px=tangent_window_px,
-        measurement_step_px=measurement_step_px,
-        width_config=width_config,
-        rgb_dir=rgb_dir,
-    )
     return df_widths
 
 
@@ -881,7 +825,7 @@ def compute_revised_crx_from_widths(
         for each image/vessel_type as a mapping.
     df_tortuosities:
         Optional one-row-per-vessel tortuosity table produced by
-        `measure_vessel_widths_and_tortuosities_between_disc_circle_pair`. When
+        `measure_vessel_tortuosities_between_disc_circle_pair`. When
         provided, the equivalent output includes the mean tortuosity of the
         selected top-width vessels.
 
