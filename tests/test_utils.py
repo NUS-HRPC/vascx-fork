@@ -107,6 +107,7 @@ def test_create_fundus_overlay_draws_tortuosity_skeleton_and_chord(
     Image.fromarray(rgb).save(rgb_path)
     vessel = np.zeros((40, 40), dtype=np.uint8)
     vessel[18:23, 20] = 1
+    vessel[20, 20:25] = 1
     Image.fromarray(vessel).save(vessel_path)
 
     output = create_fundus_overlay(
@@ -126,6 +127,7 @@ def test_create_fundus_overlay_draws_tortuosity_skeleton_and_chord(
     assert tuple(output[18, 20]) == (0, 255, 0)
     assert tuple(output[20, 20]) == (0, 255, 0)
     assert tuple(output[22, 20]) == (0, 255, 0)
+    assert tuple(output[20, 24]) == (0, 0, 0)
     assert tuple(output[20, 19]) == (0, 0, 0)
     assert tuple(output[20, 21]) == (0, 0, 0)
 

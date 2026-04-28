@@ -1,4 +1,5 @@
 import logging
+from collections import deque
 from pathlib import Path
 from typing import Dict, Mapping, Optional, Sequence, Tuple
 
@@ -10,6 +11,17 @@ from .config import OverlayConfig
 from .vessel_paths import skeletonize
 
 logger = logging.getLogger(__name__)
+
+_NEIGHBORS_8: tuple[tuple[int, int], ...] = (
+    (-1, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, -1),
+    (0, 1),
+    (1, -1),
+    (1, 0),
+    (1, 1),
+)
 
 
 def _rasterize_line_segments(
@@ -40,6 +52,92 @@ def _rasterize_vessel_width_measurements(
     if vessel_mask is not None:
         return rasterized_mask & vessel_mask
     return rasterized_mask
+
+
+def _nearest_skeleton_coordinate(
+    skeleton_mask: np.ndarray,
+    x_value: float,
+    y_value: float,
+) -> tuple[int, int] | None:
+    rows, cols = np.nonzero(skeleton_mask)
+    if len(rows) == 0:
+        return None
+    deltas = (cols.astype(float) - float(x_value)) ** 2 + (
+        rows.astype(float) - float(y_value)
+    ) ** 2
+    nearest_index = int(np.argmin(deltas))
+    return int(rows[nearest_index]), int(cols[nearest_index])
+
+
+def _trace_skeleton_segment(
+    skeleton_mask: np.ndarray,
+    start_yx: tuple[int, int],
+    end_yx: tuple[int, int],
+) -> np.ndarray:
+    if start_yx == end_yx:
+        mask = np.zeros_like(skeleton_mask, dtype=bool)
+        mask[start_yx] = True
+        return mask
+
+    parents: dict[tuple[int, int], tuple[int, int] | None] = {start_yx: None}
+    queue: deque[tuple[int, int]] = deque([start_yx])
+
+    while queue:
+        y_value, x_value = queue.popleft()
+        for delta_y, delta_x in _NEIGHBORS_8:
+            next_y = y_value + delta_y
+            next_x = x_value + delta_x
+            next_coord = (next_y, next_x)
+            if (
+                next_y < 0
+                or next_x < 0
+                or next_y >= skeleton_mask.shape[0]
+                or next_x >= skeleton_mask.shape[1]
+                or not skeleton_mask[next_y, next_x]
+                or next_coord in parents
+            ):
+                continue
+            parents[next_coord] = (y_value, x_value)
+            if next_coord == end_yx:
+                queue.clear()
+                break
+            queue.append(next_coord)
+
+    if end_yx not in parents:
+        return np.zeros_like(skeleton_mask, dtype=bool)
+
+    segment_mask = np.zeros_like(skeleton_mask, dtype=bool)
+    current = end_yx
+    while current is not None:
+        segment_mask[current] = True
+        current = parents[current]
+    return segment_mask
+
+
+def _rasterize_tortuosity_skeleton_segments(
+    vessel_mask: np.ndarray,
+    measurements: Sequence[Mapping[str, object]],
+) -> np.ndarray:
+    skeleton_mask = skeletonize(vessel_mask)
+    if not np.any(skeleton_mask):
+        return skeleton_mask
+
+    segment_mask = np.zeros_like(skeleton_mask, dtype=bool)
+    for measurement in measurements:
+        start_yx = _nearest_skeleton_coordinate(
+            skeleton_mask,
+            x_value=float(measurement["x_start"]),
+            y_value=float(measurement["y_start"]),
+        )
+        end_yx = _nearest_skeleton_coordinate(
+            skeleton_mask,
+            x_value=float(measurement["x_end"]),
+            y_value=float(measurement["y_end"]),
+        )
+        if start_yx is None or end_yx is None:
+            continue
+        segment_mask |= _trace_skeleton_segment(skeleton_mask, start_yx, end_yx)
+    return segment_mask
 
 
 def create_fundus_overlay(
@@ -152,7 +250,10 @@ def create_fundus_overlay(
 
     if tortuosity_measurements:
         if vessel_mask is not None:
-            vessel_skeleton_mask = skeletonize(vessel_mask)
+            vessel_skeleton_mask = _rasterize_tortuosity_skeleton_segments(
+                vessel_mask,
+                tortuosity_measurements,
+            )
             output_img[vessel_skeleton_mask, :] = overlay_config.colors.vessel
         tortuosity_mask = _rasterize_line_segments(
             image_shape=output_img.shape[:2],
