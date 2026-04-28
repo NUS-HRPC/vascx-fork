@@ -17,6 +17,7 @@ dependencies = [
     "Pillow==11.*",
     "click==8.*",
     "PyYAML==6.*",
+    "pydantic>=2.0",
     "scikit-image",
     "huggingface_hub",
     "retinalysis-fundusprep",
