@@ -1,49 +1,49 @@
 overlay:
-  enabled: true
+  enabled: true # true|false
   layers:
-    arteries: true
-    veins: true
-    disc: true
-    fovea: true
-    vessel_widths: true
+    arteries: true # true|false
+    veins: true # true|false
+    disc: true # true|false
+    fovea: true # true|false
+    vessel_widths: true # true|false
   colours:
-    artery: "#FF0000"
-    vein: "#0000FF"
-    vessel: "#00FF00"
-    disc: "#FFFFFF"
-    fovea: "#FFFF00"
-    vessel_widths: "#00FF00"
+    artery: "#FF0000" # any RGB hex string, e.g. "#RRGGBB"
+    vein: "#0000FF" # any RGB hex string
+    vessel: "#00FF00" # any RGB hex string; also used for tortuosity overlays
+    disc: "#FFFFFF" # any RGB hex string
+    fovea: "#FFFF00" # any RGB hex string
+    vessel_widths: "#00FF00" # any RGB hex string
   circles:
-    - name: "2r"
+    - name: "2r" # any unique circle label referenced below by inner_circle/outer_circle
       diameter: 2.0
-      color: "#00FF00"
+      color: "#00FF00" # any RGB hex string
     - name: "3r"
       diameter: 3.0
       color: "#00FF00"
 vessel_widths:
   inner_circle: "2r" # from optic disc center, e.g. "2r" for 2 times the optic disc radius
-  outer_circle: "3r"
-  samples_per_connection: 5 # -1 measures every interior path pixel, excluding endpoints
-  method: "mask"
+  outer_circle: "3r" # must match one of overlay.circles[*].name and be larger than inner_circle
+  samples_per_connection: 5 # positive integer = evenly spaced samples per vessel; -1 = every interior path pixel
+  method: "mask" # one of: "mask", "pvbm_mask", "profile"
   pvbm_mask:
-    direction_lag_px: 6.0
-    max_asymmetry_px: 1.0
+    direction_lag_px: 6.0 # positive number; only used when method: "pvbm_mask"
+    max_asymmetry_px: 1.0 # non-negative number; only used when method: "pvbm_mask"
   profile:
-    image_source: "preprocessed_rgb"
-    channel: "green"
-    half_length_px: 20.0
-    sample_step_px: 0.25
-    smoothing_sigma_px: 1.0
-    boundary_method: "half_depth"
-    threshold_alpha: 0.5
-    min_contrast: 0.05
-    min_width_px: 1.0
-    max_width_px: 80.0
-    use_mask_guardrail: true
-    mask_guardrail_min_ratio: 0.4
-    mask_guardrail_max_ratio: 2.5
-    fallback_to_mask: false
-    tangent_window_px: 10.0
+    image_source: "preprocessed_rgb" # relative output subdir or absolute path to RGB images; used when method: "profile"
+    channel: "green" # one of: "red", "green", "blue"
+    half_length_px: 20.0 # positive number
+    sample_step_px: 0.25 # positive number
+    smoothing_sigma_px: 1.0 # non-negative number
+    boundary_method: "half_depth" # currently only: "half_depth"
+    threshold_alpha: 0.5 # number in [0, 1]
+    min_contrast: 0.05 # non-negative number
+    min_width_px: 1.0 # positive number; must be <= max_width_px
+    max_width_px: 80.0 # positive number; must be >= min_width_px
+    use_mask_guardrail: true # true|false
+    mask_guardrail_min_ratio: 0.4 # positive number; must be <= mask_guardrail_max_ratio
+    mask_guardrail_max_ratio: 2.5 # positive number; must be >= mask_guardrail_min_ratio
+    fallback_to_mask: false # true|false; only relevant when method: "profile"
+    tangent_window_px: 10.0 # positive number; only relevant when method: "profile"
 vessel_tortuosities:
-  inner_circle: "2r"
-  outer_circle: "5r"
+  inner_circle: "2r" # must match one of overlay.circles[*].name
+  outer_circle: "5r" # must match one of overlay.circles[*].name and be larger than inner_circle

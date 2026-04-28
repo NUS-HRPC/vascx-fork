@@ -9,6 +9,7 @@ from vascx_models.config import OverlayCircle
 from vascx_models.vessel_tortuosities import (
     compute_path_tortuosity,
     measure_vessel_tortuosities_between_disc_circle_pair,
+    summarize_vessel_tortuosities,
     vessel_tortuosity_record,
 )
 
@@ -164,8 +165,112 @@ def test_measure_vessel_tortuosities_between_disc_circle_pair_measures_one_to_ma
         outer_circle=OverlayCircle(name="outer", diameter=3.0),
     )
 
-    assert len(df_tortuosities) == 2
-    assert sorted(df_tortuosities["connection_index"].tolist()) == [1, 2]
-    assert df_tortuosities["vessel_type"].tolist() == ["vein", "vein"]
-    assert sorted(df_tortuosities["x_end"].tolist()) == [51.0, 129.0]
-    assert df_tortuosities["path_length_px"].tolist() == pytest.approx([44.0, 44.0])
+    assert len(df_tortuosities) == 3
+    assert sorted(df_tortuosities["connection_index"].tolist()) == [1, 2, 3]
+    assert df_tortuosities["vessel_type"].tolist() == ["vein", "vein", "vein"]
+    assert sorted(df_tortuosities["x_end"].tolist()) == [51.0, 90.0, 129.0]
+    assert sorted(df_tortuosities["path_length_px"].tolist()) == pytest.approx(
+        [5.0, 39.0, 39.0]
+    )
+
+
+def test_measure_vessel_tortuosities_between_disc_circle_pair_discards_many_to_one(
+    tmp_path: Path,
+) -> None:
+    vessels_dir = tmp_path / "vessels"
+    av_dir = tmp_path / "artery_vein"
+    vessels_dir.mkdir()
+    av_dir.mkdir()
+
+    height = width = 180
+    vessel = np.zeros((height, width), dtype=np.uint8)
+    av = np.zeros((height, width), dtype=np.uint8)
+
+    for offset in range(0, 21):
+        vessel[130 + offset, 70 + offset] = 1
+        av[130 + offset, 70 + offset] = 1
+        vessel[130 + offset, 110 - offset] = 1
+        av[130 + offset, 110 - offset] = 1
+    vessel[150:161, 90] = 1
+    av[150:161, 90] = 1
+
+    _write_mask(vessels_dir / "sample.png", vessel)
+    _write_mask(av_dir / "sample.png", av)
+
+    geometry_path = tmp_path / "disc_geometry.csv"
+    pd.DataFrame(
+        {
+            "x_disc_center": [90.0],
+            "y_disc_center": [90.0],
+            "disc_radius_px": [20.0],
+        },
+        index=["sample"],
+    ).to_csv(geometry_path)
+
+    df_tortuosities = measure_vessel_tortuosities_between_disc_circle_pair(
+        vessels_dir=vessels_dir,
+        av_dir=av_dir,
+        disc_geometry_path=geometry_path,
+        inner_circle=OverlayCircle(name="inner", diameter=2.0),
+        outer_circle=OverlayCircle(name="outer", diameter=3.0),
+    )
+
+    assert df_tortuosities.empty
+
+
+def test_summarize_vessel_tortuosities_uses_path_length_weighting() -> None:
+    df_tortuosities = pd.DataFrame.from_records(
+        [
+            {
+                "image_id": "sample",
+                "inner_circle": "2r",
+                "outer_circle": "3r",
+                "inner_circle_radius_px": 40.0,
+                "outer_circle_radius_px": 60.0,
+                "connection_index": 1,
+                "x_start": 0.0,
+                "y_start": 0.0,
+                "x_end": 1.0,
+                "y_end": 0.0,
+                "path_length_px": 10.0,
+                "chord_length_px": 9.0,
+                "tortuosity": 1.1,
+                "vessel_type": "artery",
+            },
+            {
+                "image_id": "sample",
+                "inner_circle": "2r",
+                "outer_circle": "3r",
+                "inner_circle_radius_px": 40.0,
+                "outer_circle_radius_px": 60.0,
+                "connection_index": 2,
+                "x_start": 1.0,
+                "y_start": 0.0,
+                "x_end": 2.0,
+                "y_end": 0.0,
+                "path_length_px": 30.0,
+                "chord_length_px": 20.0,
+                "tortuosity": 1.5,
+                "vessel_type": "artery",
+            },
+        ]
+    )
+
+    df_summary = summarize_vessel_tortuosities(df_tortuosities)
+
+    assert df_summary.columns.tolist() == [
+        "image_id",
+        "metric",
+        "vessel_type",
+        "inner_circle",
+        "outer_circle",
+        "inner_circle_radius_px",
+        "outer_circle_radius_px",
+        "n_segments",
+        "total_length_px",
+        "mean_tortuosity_weighted",
+    ]
+    assert df_summary.iloc[0]["metric"] == "TORTA"
+    assert df_summary.iloc[0]["n_segments"] == 2
+    assert df_summary.iloc[0]["total_length_px"] == pytest.approx(40.0)
+    assert df_summary.iloc[0]["mean_tortuosity_weighted"] == pytest.approx(1.4)

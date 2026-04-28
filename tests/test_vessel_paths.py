@@ -9,6 +9,12 @@ from vascx_models.vessel_paths import (
 )
 
 
+def _assert_contiguous_skeleton_path(path_xy: np.ndarray) -> None:
+    assert len(path_xy) >= 2
+    deltas = np.diff(path_xy, axis=0)
+    assert np.all(np.max(np.abs(deltas), axis=1) == 1.0)
+
+
 def test_path_cumulative_lengths_and_interpolation() -> None:
     path_xy = np.array(
         [
@@ -82,7 +88,9 @@ def test_trace_vessel_paths_between_disc_circle_pair_prunes_dead_end_branch() ->
         assert set(path.path_xy[:, 0].tolist()) == {80.0}
 
 
-def test_trace_vessel_paths_between_disc_circle_pair_keeps_inner_trunk_for_fork() -> None:
+def test_trace_vessel_paths_between_disc_circle_pair_keeps_inner_trunk_for_fork() -> (
+    None
+):
     height = width = 180
     vessel = np.zeros((height, width), dtype=bool)
     vessel[130:136, 90] = True
@@ -104,7 +112,7 @@ def test_trace_vessel_paths_between_disc_circle_pair_keeps_inner_trunk_for_fork(
     )
 
 
-def test_trace_vessel_tortuosity_paths_between_disc_circle_pair_keeps_one_to_many_paths() -> (
+def test_trace_vessel_tortuosity_paths_between_disc_circle_pair_splits_bifurcation() -> (
     None
 ):
     height = width = 180
@@ -121,6 +129,44 @@ def test_trace_vessel_tortuosity_paths_between_disc_circle_pair_keeps_one_to_man
         boundary_tolerance_px=1.5,
     )
 
-    assert len(paths) == 2
-    assert sorted(path.path_xy[-1, 0] for path in paths) == [51.0, 129.0]
-    assert all(path.path_xy[0].tolist() == [90.0, 130.0] for path in paths)
+    assert len(paths) == 3
+    assert [path.connection_index for path in paths] == [1, 2, 3]
+
+    trunk_path = next(
+        path for path in paths if path.path_xy[-1].tolist() == [90.0, 135.0]
+    )
+    child_paths = [path for path in paths if path is not trunk_path]
+
+    assert trunk_path.path_xy[0].tolist() == [90.0, 130.0]
+    assert trunk_path.path_xy[-1].tolist() == [90.0, 135.0]
+    assert sorted(path.path_xy[-1, 0] for path in child_paths) == [51.0, 129.0]
+    assert all(path.path_xy[0].tolist() == [90.0, 135.0] for path in child_paths)
+
+    for path in paths:
+        _assert_contiguous_skeleton_path(path.path_xy)
+        assert path.skeleton.sum() == len(path.path_xy)
+        assert np.column_stack(np.nonzero(path.skeleton))[:, ::-1].tolist() == sorted(
+            path.path_xy.astype(int).tolist()
+        )
+
+
+def test_trace_vessel_tortuosity_paths_between_disc_circle_pair_discards_many_to_one() -> (
+    None
+):
+    height = width = 180
+    vessel = np.zeros((height, width), dtype=bool)
+    for offset in range(0, 21):
+        vessel[130 + offset, 70 + offset] = True
+        vessel[130 + offset, 110 - offset] = True
+    vessel[150:161, 90] = True
+    disc_center_xy = np.array([90.0, 90.0], dtype=float)
+
+    paths = trace_vessel_tortuosity_paths_between_disc_circle_pair(
+        vessel_mask=vessel,
+        disc_center_xy=disc_center_xy,
+        inner_radius_px=40.0,
+        outer_radius_px=60.0,
+        boundary_tolerance_px=1.5,
+    )
+
+    assert paths == []

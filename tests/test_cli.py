@@ -231,20 +231,27 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
     assert calls["generate_disc_circles"]["circles"][0].name == "2r"
     assert calls["generate_disc_circles"]["circles"][0].color == (0, 255, 0)
     overlay_calls = calls["batch_create_overlays"]
-    assert len(overlay_calls) == 2
+    assert len(overlay_calls) == 3
     assert overlay_calls[0]["output_dir"] == output_dir / "overlays"
     assert overlay_calls[0]["vessels_dir"] == output_dir / "vessels"
     assert overlay_calls[0]["overlay_config"].layers.vessel_widths is False
     measurement_data = overlay_calls[0]["vessel_width_data"]
     assert isinstance(measurement_data, pd.DataFrame)
     assert measurement_data.iloc[0]["width_px"] == 7.0
-    assert overlay_calls[1]["output_dir"] == output_dir / "vessel_equivalent_overlays"
-    assert overlay_calls[1]["overlay_config"].layers.vessel_widths is True
-    selected_measurement_data = overlay_calls[1]["vessel_width_data"]
+    assert overlay_calls[1]["output_dir"] == output_dir / "vessel_tortuosity_overlays"
+    assert overlay_calls[1]["vessels_dir"] == output_dir / "vessels"
+    assert overlay_calls[1]["tortuosity_data"].iloc[0]["tortuosity"] == 1.0
+    assert overlay_calls[1]["overlay_config"].colors.vessel == (0, 255, 0)
+    assert overlay_calls[2]["output_dir"] == output_dir / "vessel_width_overlays"
+    assert overlay_calls[2]["overlay_config"].layers.vessel_widths is True
+    selected_measurement_data = overlay_calls[2]["vessel_width_data"]
     assert isinstance(selected_measurement_data, pd.DataFrame)
     assert selected_measurement_data.iloc[0]["width_px"] == 7.0
 
     vessel_equivalents = pd.read_csv(output_dir / "vessel_equivalents.csv")
+    vessel_tortuosity_summary = pd.read_csv(
+        output_dir / "vessel_tortuosity_summary.csv"
+    )
     assert vessel_equivalents.columns.tolist() == [
         "image_id",
         "metric",
@@ -259,6 +266,19 @@ def test_cli_run_passes_measurement_config_and_data_to_overlays(
     assert vessel_equivalents.iloc[0]["metric"] == "CRAE"
     assert vessel_equivalents.iloc[0]["vessel_ids_used"] == "artery_1"
     assert vessel_equivalents.iloc[0]["n_vessels_used"] == 1
+    assert vessel_tortuosity_summary.columns.tolist() == [
+        "image_id",
+        "metric",
+        "vessel_type",
+        "inner_circle",
+        "outer_circle",
+        "inner_circle_radius_px",
+        "outer_circle_radius_px",
+        "n_segments",
+        "total_length_px",
+        "mean_tortuosity_weighted",
+    ]
+    assert vessel_tortuosity_summary.iloc[0]["metric"] == "TORTA"
 
 
 def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
@@ -273,8 +293,12 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
     (source_dir / "disc_circles" / "stale.txt").write_text("stale", encoding="utf-8")
     (source_dir / "overlays").mkdir()
     (source_dir / "overlays" / "stale.png").write_text("stale", encoding="utf-8")
-    (source_dir / "vessel_equivalent_overlays").mkdir()
-    (source_dir / "vessel_equivalent_overlays" / "stale.png").write_text(
+    (source_dir / "vessel_tortuosity_overlays").mkdir()
+    (source_dir / "vessel_tortuosity_overlays" / "stale.png").write_text(
+        "stale", encoding="utf-8"
+    )
+    (source_dir / "vessel_width_overlays").mkdir()
+    (source_dir / "vessel_width_overlays" / "stale.png").write_text(
         "stale", encoding="utf-8"
     )
 
@@ -464,18 +488,25 @@ def test_cli_vessel_metrics_copies_source_output_and_writes_outputs(
     assert calls["measure_vessel_tortuosities"]["av_dir"] == (
         output_dir / "artery_vein"
     )
-    assert len(calls["batch_create_overlays"]) == 2
+    assert len(calls["batch_create_overlays"]) == 3
     assert calls["batch_create_overlays"][0]["output_dir"] == output_dir / "overlays"
     assert calls["batch_create_overlays"][1]["output_dir"] == (
-        output_dir / "vessel_equivalent_overlays"
+        output_dir / "vessel_tortuosity_overlays"
+    )
+    assert calls["batch_create_overlays"][2]["output_dir"] == (
+        output_dir / "vessel_width_overlays"
     )
     assert not (output_dir / "overlays" / "stale.png").exists()
-    assert not (output_dir / "vessel_equivalent_overlays" / "stale.png").exists()
+    assert not (output_dir / "vessel_width_overlays" / "stale.png").exists()
+    assert not (output_dir / "vessel_tortuosity_overlays" / "stale.png").exists()
     assert (output_dir / "overlays" / "fresh.txt").exists()
-    assert (output_dir / "vessel_equivalent_overlays" / "fresh.txt").exists()
+    assert (output_dir / "vessel_width_overlays" / "fresh.txt").exists()
+    assert (output_dir / "vessel_tortuosity_overlays" / "fresh.txt").exists()
     assert (output_dir / "vessel_widths.csv").exists()
     assert pd.read_csv(output_dir / "vessel_widths.csv").iloc[0]["width_px"] == 7.0
     assert (output_dir / "vessel_tortuosities.csv").exists()
+    assert (output_dir / "vessel_tortuosity_summary.csv").exists()
+    assert (output_dir / "vessel_tortuosity_overlays").exists()
     equivalents = pd.read_csv(output_dir / "vessel_equivalents.csv")
     assert equivalents.iloc[0]["metric"] == "CRAE"
     assert "mean_tortuosity_used" not in equivalents.columns
@@ -503,7 +534,7 @@ def test_cli_vessel_metrics_uses_timestamped_output_when_omitted(
         (kwargs["output_path"] / "vessel_widths.csv").write_text(
             "image_id\n", encoding="utf-8"
         )
-        return tuple(pd.DataFrame() for _ in range(4))
+        return tuple(pd.DataFrame() for _ in range(5))
 
     monkeypatch.setattr("vascx_models.cli.datetime", FixedDatetime)
     monkeypatch.setattr(

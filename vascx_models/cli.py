@@ -24,7 +24,10 @@ from .inference import (
     run_segmentation_vessels_and_av,
 )
 from .utils import batch_create_overlays
-from .vessel_tortuosities import measure_vessel_tortuosities_between_disc_circle_pair
+from .vessel_tortuosities import (
+    measure_vessel_tortuosities_between_disc_circle_pair,
+    summarize_vessel_tortuosities,
+)
 from .vessel_widths import (
     compute_revised_crx_from_widths,
     measure_vessel_widths_between_disc_circle_pair,
@@ -116,6 +119,94 @@ def _load_fovea_overlay_data(fovea_path: Path) -> dict[str, tuple[int, int]] | N
     }
 
 
+def _overlay_circle_dirs(output_path: Path, circles) -> dict[str, Path]:
+    disc_circles_dir = output_path / "disc_circles"
+    return {
+        circle.name: disc_circles_dir / circle.name
+        for circle in circles
+        if (disc_circles_dir / circle.name).is_dir()
+    }
+
+
+def _tortuosity_overlay_config(overlay_config):
+    return replace(
+        overlay_config,
+        layers=replace(
+            overlay_config.layers,
+            arteries=False,
+            veins=False,
+            disc=False,
+            fovea=False,
+            vessel_widths=False,
+        ),
+        colors=replace(overlay_config.colors, vessel=(0, 255, 0)),
+    )
+
+
+def _width_overlay_config(overlay_config):
+    return replace(
+        overlay_config,
+        layers=replace(overlay_config.layers, vessel_widths=True),
+    )
+
+
+def _render_metric_overlays(
+    output_path: Path,
+    rgb_dir: Path,
+    overlay_config,
+    av_dir: Path | None,
+    disc_dir: Path | None,
+    vessels_dir: Path,
+    df_vessel_widths: pd.DataFrame | None,
+    df_vessel_tortuosities: pd.DataFrame | None,
+    df_selected_equivalent_widths: pd.DataFrame | None,
+    fovea_data: dict[str, tuple[int, int]] | None,
+) -> None:
+    circle_dirs = _overlay_circle_dirs(output_path, overlay_config.circles)
+
+    batch_create_overlays(
+        rgb_dir=rgb_dir,
+        output_dir=output_path / "overlays",
+        av_dir=av_dir,
+        disc_dir=disc_dir,
+        vessels_dir=vessels_dir,
+        circle_dirs=circle_dirs,
+        vessel_width_data=df_vessel_widths,
+        fovea_data=fovea_data,
+        overlay_config=overlay_config,
+    )
+
+    if df_vessel_tortuosities is not None:
+        batch_create_overlays(
+            rgb_dir=rgb_dir,
+            output_dir=output_path / "vessel_tortuosity_overlays",
+            vessels_dir=vessels_dir,
+            tortuosity_data=df_vessel_tortuosities,
+            overlay_config=_tortuosity_overlay_config(overlay_config),
+        )
+        logger.info(
+            "Vessel tortuosity overlays saved to %s",
+            output_path / "vessel_tortuosity_overlays",
+        )
+
+    if df_selected_equivalent_widths is not None:
+        batch_create_overlays(
+            rgb_dir=rgb_dir,
+            output_dir=output_path / "vessel_width_overlays",
+            av_dir=av_dir,
+            disc_dir=disc_dir,
+            vessels_dir=vessels_dir,
+            circle_dirs=circle_dirs,
+            vessel_width_data=df_selected_equivalent_widths,
+            fovea_data=fovea_data,
+            overlay_config=_width_overlay_config(overlay_config),
+        )
+        logger.info(
+            "Vessel width overlays saved to %s",
+            output_path / "vessel_width_overlays",
+        )
+
+
 def _refresh_vessel_metric_disc_artifacts(
     output_path: Path,
     config_path: Path | None = None,
@@ -149,12 +240,18 @@ def _refresh_vessel_metric_disc_artifacts(
 def _refresh_vessel_metric_overlays(
     output_path: Path,
     df_vessel_widths: pd.DataFrame,
+    df_vessel_tortuosities: pd.DataFrame,
     df_connection_widths: pd.DataFrame,
     config_path: Path | None = None,
 ) -> None:
     overlay_path = output_path / "overlays"
-    vessel_equivalent_overlay_path = output_path / "vessel_equivalent_overlays"
-    for overlay_dir in (overlay_path, vessel_equivalent_overlay_path):
+    vessel_width_overlay_path = output_path / "vessel_width_overlays"
+    vessel_tortuosity_overlay_path = output_path / "vessel_tortuosity_overlays"
+    for overlay_dir in (
+        overlay_path,
+        vessel_width_overlay_path,
+        vessel_tortuosity_overlay_path,
+    ):
         if overlay_dir.exists():
             shutil.rmtree(overlay_dir)
 
@@ -176,44 +273,23 @@ def _refresh_vessel_metric_overlays(
         return
 
     disc_dir = output_path / "disc"
-    disc_circles_dir = output_path / "disc_circles"
-    circle_dirs = {
-        circle.name: disc_circles_dir / circle.name
-        for circle in app_config.overlay.circles
-        if (disc_circles_dir / circle.name).is_dir()
-    }
     fovea_data = _load_fovea_overlay_data(output_path / "fovea.csv")
-
-    batch_create_overlays(
-        rgb_dir=rgb_dir,
-        output_dir=overlay_path,
-        av_dir=output_path / "artery_vein",
-        disc_dir=disc_dir if disc_dir.is_dir() else None,
-        vessels_dir=output_path / "vessels",
-        circle_dirs=circle_dirs,
-        vessel_width_data=df_vessel_widths,
-        fovea_data=fovea_data,
-        overlay_config=app_config.overlay,
-    )
 
     df_selected_equivalent_widths = select_vessel_width_measurements_for_equivalents(
         df_vessel_widths,
         df_connection_widths,
     )
-    equivalent_overlay_config = replace(
-        app_config.overlay,
-        layers=replace(app_config.overlay.layers, vessel_widths=True),
-    )
-    batch_create_overlays(
+    _render_metric_overlays(
+        output_path=output_path,
         rgb_dir=rgb_dir,
-        output_dir=vessel_equivalent_overlay_path,
+        overlay_config=app_config.overlay,
         av_dir=output_path / "artery_vein",
         disc_dir=disc_dir if disc_dir.is_dir() else None,
         vessels_dir=output_path / "vessels",
-        circle_dirs=circle_dirs,
-        vessel_width_data=df_selected_equivalent_widths,
+        df_vessel_widths=df_vessel_widths,
+        df_vessel_tortuosities=df_vessel_tortuosities,
+        df_selected_equivalent_widths=df_selected_equivalent_widths,
         fovea_data=fovea_data,
-        overlay_config=equivalent_overlay_config,
     )
     logger.info("Overlay regeneration complete in %s", output_path)
 
@@ -224,7 +300,7 @@ def _compute_and_save_vessel_metrics(
     disc_geometry_path: Path,
     output_path: Path,
     config_path: Path | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     try:
         app_config = load_app_config(config_path)
         width_inner_circle, width_outer_circle = resolve_vessel_width_circle_pair(
@@ -251,6 +327,7 @@ def _compute_and_save_vessel_metrics(
 
     vessel_widths_path = output_path / "vessel_widths.csv"
     vessel_tortuosities_path = output_path / "vessel_tortuosities.csv"
+    vessel_tortuosity_summary_path = output_path / "vessel_tortuosity_summary.csv"
     vessel_equivalents_path = output_path / "vessel_equivalents.csv"
 
     logger.info(
@@ -292,11 +369,17 @@ def _compute_and_save_vessel_metrics(
     df_connection_widths, df_vessel_equivalents = compute_revised_crx_from_widths(
         df_vessel_widths
     )
+    df_vessel_tortuosity_summary = summarize_vessel_tortuosities(
+        df_vessel_tortuosities,
+        output_path=vessel_tortuosity_summary_path,
+    )
+    logger.info("Vessel tortuosity summary saved to %s", vessel_tortuosity_summary_path)
     df_vessel_equivalents.to_csv(vessel_equivalents_path, index=False)
     logger.info("Vessel equivalents saved to %s", vessel_equivalents_path)
     return (
         df_vessel_widths,
         df_vessel_tortuosities,
+        df_vessel_tortuosity_summary,
         df_connection_widths,
         df_vessel_equivalents,
     )
@@ -360,6 +443,7 @@ def vessel_metrics(
     )
     (
         df_vessel_widths,
+        df_vessel_tortuosities,
         _,
         df_connection_widths,
         _,
@@ -373,6 +457,7 @@ def vessel_metrics(
     _refresh_vessel_metric_overlays(
         output_path=output_path,
         df_vessel_widths=df_vessel_widths,
+        df_vessel_tortuosities=df_vessel_tortuosities,
         df_connection_widths=df_connection_widths,
         config_path=config_path,
     )
@@ -472,6 +557,9 @@ def run(
     vessel_widths_path = output_path / "vessel_widths.csv" if disc and vessels else None
     vessel_tortuosities_path = (
         output_path / "vessel_tortuosities.csv" if disc and vessels else None
+    )
+    vessel_tortuosity_summary_path = (
+        output_path / "vessel_tortuosity_summary.csv" if disc and vessels else None
     )
     vessel_equivalents_path = (
         output_path / "vessel_equivalents.csv" if disc and vessels else None
@@ -599,6 +687,7 @@ def run(
         (
             df_vessel_widths,
             df_vessel_tortuosities,
+            _,
             df_connection_widths,
             _,
         ) = _compute_and_save_vessel_metrics(
@@ -613,6 +702,11 @@ def run(
                 df_vessel_widths,
                 df_connection_widths,
             )
+        )
+        logger.info(
+            "Vessel tortuosity outputs saved to %s and %s",
+            vessel_tortuosities_path,
+            vessel_tortuosity_summary_path,
         )
 
     # Step 6: Run fovea detection if requested
@@ -629,54 +723,24 @@ def run(
     if overlay_enabled:
         logger.info("Creating visualization overlays")
 
-        # Prepare fovea data if available
         fovea_data = None
         if df_fovea is not None:
             fovea_data = {
                 idx: (row["x_fovea"], row["y_fovea"])
                 for idx, row in df_fovea.iterrows()
             }
-
-        # Create visualization overlays
-        batch_create_overlays(
+        _render_metric_overlays(
+            output_path=output_path,
             rgb_dir=preprocess_rgb_path if preprocess else data_path,
-            output_dir=overlay_path,
+            overlay_config=app_config.overlay,
             av_dir=av_path,
             disc_dir=disc_path,
             vessels_dir=vessels_path,
-            circle_dirs={
-                circle.name: disc_circles_path / circle.name
-                for circle in app_config.overlay.circles
-            },
-            vessel_width_data=df_vessel_widths,
+            df_vessel_widths=df_vessel_widths,
+            df_vessel_tortuosities=df_vessel_tortuosities if disc and vessels else None,
+            df_selected_equivalent_widths=df_selected_equivalent_widths,
             fovea_data=fovea_data,
-            overlay_config=app_config.overlay,
         )
-
-        if df_selected_equivalent_widths is not None:
-            vessel_equivalent_overlay_path = output_path / "vessel_equivalent_overlays"
-            equivalent_overlay_config = replace(
-                app_config.overlay,
-                layers=replace(app_config.overlay.layers, vessel_widths=True),
-            )
-            batch_create_overlays(
-                rgb_dir=preprocess_rgb_path if preprocess else data_path,
-                output_dir=vessel_equivalent_overlay_path,
-                av_dir=av_path,
-                disc_dir=disc_path,
-                vessels_dir=vessels_path,
-                circle_dirs={
-                    circle.name: disc_circles_path / circle.name
-                    for circle in app_config.overlay.circles
-                },
-                vessel_width_data=df_selected_equivalent_widths,
-                fovea_data=fovea_data,
-                overlay_config=equivalent_overlay_config,
-            )
-            logger.info(
-                "Vessel equivalent selection overlays saved to %s",
-                vessel_equivalent_overlay_path,
-            )
 
         logger.info("Visualization overlays saved to %s", overlay_path)
 

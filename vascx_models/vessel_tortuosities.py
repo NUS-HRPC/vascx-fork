@@ -8,6 +8,7 @@ import pandas as pd
 from PIL import Image
 
 from .config import OverlayCircle
+from .vessel_masks import typed_vessel_masks
 from .vessel_paths import trace_vessel_tortuosity_paths_between_disc_circle_pair
 
 VESSEL_TORTUOSITY_COLUMNS = [
@@ -27,6 +28,19 @@ VESSEL_TORTUOSITY_COLUMNS = [
     "vessel_type",
 ]
 
+VESSEL_TORTUOSITY_SUMMARY_COLUMNS = [
+    "image_id",
+    "metric",
+    "vessel_type",
+    "inner_circle",
+    "outer_circle",
+    "inner_circle_radius_px",
+    "outer_circle_radius_px",
+    "n_segments",
+    "total_length_px",
+    "mean_tortuosity_weighted",
+]
+
 
 def compute_path_tortuosity(path_xy: np.ndarray) -> tuple[float, float, float]:
     """Return path length, chord length, and tortuosity for an ordered path."""
@@ -37,9 +51,7 @@ def compute_path_tortuosity(path_xy: np.ndarray) -> tuple[float, float, float]:
     path_length_px = float(np.hypot(deltas[:, 0], deltas[:, 1]).sum())
     chord_length_px = float(np.linalg.norm(path_xy[-1] - path_xy[0]))
     tortuosity = (
-        path_length_px / chord_length_px
-        if chord_length_px > 0.0
-        else float("nan")
+        path_length_px / chord_length_px if chord_length_px > 0.0 else float("nan")
     )
     return path_length_px, chord_length_px, float(tortuosity)
 
@@ -74,13 +86,68 @@ def vessel_tortuosity_record(
     }
 
 
-def _typed_vessel_masks(
-    vessel_mask: np.ndarray,
-    av_mask: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    artery_mask = vessel_mask & np.isin(av_mask, (1, 3))
-    vein_mask = vessel_mask & np.isin(av_mask, (2, 3))
-    return artery_mask, vein_mask
+def summarize_vessel_tortuosities(
+    df_tortuosities: pd.DataFrame,
+    output_path: Optional[Path] = None,
+) -> pd.DataFrame:
+    """Aggregate per-segment tortuosities into length-weighted summaries."""
+    if df_tortuosities.empty:
+        df_summary = pd.DataFrame(columns=VESSEL_TORTUOSITY_SUMMARY_COLUMNS)
+        if output_path is not None:
+            df_summary.to_csv(output_path, index=False)
+        return df_summary
+
+    group_cols = [
+        "image_id",
+        "vessel_type",
+        "inner_circle",
+        "outer_circle",
+        "inner_circle_radius_px",
+        "outer_circle_radius_px",
+    ]
+    summary_records: list[dict[str, object]] = []
+    for group_key, group in df_tortuosities.groupby(group_cols, dropna=False):
+        valid = group.loc[
+            np.isfinite(group["tortuosity"])
+            & np.isfinite(group["path_length_px"])
+            & (group["path_length_px"] > 0.0)
+        ]
+        (
+            image_id,
+            vessel_type,
+            inner_circle,
+            outer_circle,
+            inner_radius_px,
+            outer_radius_px,
+        ) = group_key
+        total_length_px = float(valid["path_length_px"].sum())
+        weighted_tortuosity = float("nan")
+        if total_length_px > 0.0:
+            weighted_tortuosity = float(
+                np.average(valid["tortuosity"], weights=valid["path_length_px"])
+            )
+        summary_records.append(
+            {
+                "image_id": image_id,
+                "metric": "TORTA" if vessel_type == "artery" else "TORTV",
+                "vessel_type": vessel_type,
+                "inner_circle": inner_circle,
+                "outer_circle": outer_circle,
+                "inner_circle_radius_px": float(inner_radius_px),
+                "outer_circle_radius_px": float(outer_radius_px),
+                "n_segments": int(len(valid)),
+                "total_length_px": total_length_px,
+                "mean_tortuosity_weighted": weighted_tortuosity,
+            }
+        )
+
+    df_summary = pd.DataFrame.from_records(
+        summary_records,
+        columns=VESSEL_TORTUOSITY_SUMMARY_COLUMNS,
+    )
+    if output_path is not None:
+        df_summary.to_csv(output_path, index=False)
+    return df_summary
 
 
 def measure_vessel_tortuosities_between_disc_circle_pair(
@@ -92,7 +159,7 @@ def measure_vessel_tortuosities_between_disc_circle_pair(
     output_path: Optional[Path] = None,
     boundary_tolerance_px: float = 1.5,
 ) -> pd.DataFrame:
-    """Measure full inner-to-outer vessel tortuosities between two circles."""
+    """Measure per-segment vessel tortuosities between two circles."""
     if not disc_geometry_path.exists():
         raise FileNotFoundError(f"Disc geometry file not found: {disc_geometry_path}")
     if not vessels_dir.exists():
@@ -117,7 +184,7 @@ def measure_vessel_tortuosities_between_disc_circle_pair(
 
         vessel_mask = np.array(Image.open(vessel_path)) > 0
         av_mask = np.array(Image.open(av_path))
-        artery_mask, vein_mask = _typed_vessel_masks(vessel_mask, av_mask)
+        artery_mask, vein_mask = typed_vessel_masks(vessel_mask, av_mask)
         disc_center_xy = np.array(
             [row["x_disc_center"], row["y_disc_center"]], dtype=float
         )

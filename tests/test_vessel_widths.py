@@ -6,9 +6,6 @@ import pytest
 from PIL import Image
 
 from vascx_models.config import OverlayCircle, ProfileWidthConfig, VesselWidthConfig
-from vascx_models.vessel_tortuosities import (
-    measure_vessel_tortuosities_between_disc_circle_pair,
-)
 from vascx_models.vessel_widths import (
     VESSEL_WIDTH_COLUMNS,
     compute_revised_crx_from_widths,
@@ -531,17 +528,7 @@ def test_measure_vessel_widths_all_methods_preserve_equivalent_aggregation(
         width_config=width_config,
         rgb_dir=rgb_dir if needs_rgb else None,
     )
-    df_tortuosities = measure_vessel_tortuosities_between_disc_circle_pair(
-        vessels_dir=vessels_dir,
-        av_dir=av_dir,
-        disc_geometry_path=geometry_path,
-        inner_circle=OverlayCircle(name="inner", diameter=2.0),
-        outer_circle=OverlayCircle(name="outer", diameter=3.0),
-    )
-    _, df_equivalents = compute_revised_crx_from_widths(
-        df_widths,
-        df_tortuosities=df_tortuosities,
-    )
+    _, df_equivalents = compute_revised_crx_from_widths(df_widths)
 
     assert not df_widths.empty
     assert sorted(df_widths["width_method"].unique().tolist()) == [expected_method]

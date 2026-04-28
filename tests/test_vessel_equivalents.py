@@ -50,30 +50,6 @@ def _vessel_width_record(
     }
 
 
-def _vessel_tortuosity_record(
-    connection_index: int,
-    tortuosity: float,
-    vessel_type: str = "artery",
-    image_id: str = "sample",
-) -> dict[str, object]:
-    return {
-        "image_id": image_id,
-        "inner_circle": "2r",
-        "outer_circle": "3r",
-        "inner_circle_radius_px": 40.0,
-        "outer_circle_radius_px": 60.0,
-        "connection_index": connection_index,
-        "x_start": 0.0,
-        "y_start": 0.0,
-        "x_end": 1.0,
-        "y_end": 1.0,
-        "path_length_px": tortuosity,
-        "chord_length_px": 1.0,
-        "tortuosity": tortuosity,
-        "vessel_type": vessel_type,
-    }
-
-
 def test_compute_revised_crx_from_widths_records_selected_vessel_ids() -> None:
     records = []
     for vessel_type, widths in {
@@ -157,9 +133,8 @@ def test_compute_revised_crx_from_widths_limits_selection_to_six_largest() -> No
     assert ("sample", "artery") in rounds
 
 
-def test_compute_revised_crx_from_widths_aggregates_selected_tortuosity() -> None:
+def test_compute_revised_crx_from_widths_selects_six_largest_connections() -> None:
     width_records = []
-    tortuosity_records = []
     for connection_index in range(1, 9):
         for sample_index in range(1, 3):
             width_records.append(
@@ -170,26 +145,14 @@ def test_compute_revised_crx_from_widths_aggregates_selected_tortuosity() -> Non
                     vessel_type="artery",
                 )
             )
-        tortuosity_records.append(
-            _vessel_tortuosity_record(
-                connection_index=connection_index,
-                tortuosity=1.0 + connection_index / 10.0,
-                vessel_type="artery",
-            )
-        )
     df_widths = pd.DataFrame.from_records(width_records)
-    df_tortuosities = pd.DataFrame.from_records(tortuosity_records)
-
-    df_connections, df_equivalents = compute_revised_crx_from_widths(
-        df_widths,
-        df_tortuosities=df_tortuosities,
-    )
+    df_connections, df_equivalents = compute_revised_crx_from_widths(df_widths)
 
     selected_connection_ids = df_connections.loc[
         df_connections["selected_for_equivalent"], "connection_index"
     ].tolist()
     assert selected_connection_ids == [3, 4, 5, 6, 7, 8]
-    assert df_equivalents.iloc[0]["mean_tortuosity_used"] == pytest.approx(1.55)
+    assert df_equivalents.iloc[0]["n_vessels_used"] == 6
 
 
 def test_compute_revised_crx_from_widths_reports_single_vessel_without_equivalent() -> (

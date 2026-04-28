@@ -7,14 +7,14 @@ import pandas as pd
 from PIL import Image, ImageDraw
 
 from .config import OverlayConfig
+from .vessel_paths import skeletonize
 
 logger = logging.getLogger(__name__)
 
 
-def _rasterize_vessel_width_measurements(
+def _rasterize_line_segments(
     image_shape: tuple[int, int],
     measurements: Sequence[Mapping[str, object]],
-    vessel_mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     mask_image = Image.new("L", (image_shape[1], image_shape[0]), 0)
     draw = ImageDraw.Draw(mask_image)
@@ -28,7 +28,15 @@ def _rasterize_vessel_width_measurements(
             float(measurement["y_end"]),
         )
         draw.line([start, end], fill=255, width=1)
-    rasterized_mask = np.array(mask_image, dtype=np.uint8) > 0
+    return np.array(mask_image, dtype=np.uint8) > 0
+
+
+def _rasterize_vessel_width_measurements(
+    image_shape: tuple[int, int],
+    measurements: Sequence[Mapping[str, object]],
+    vessel_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    rasterized_mask = _rasterize_line_segments(image_shape, measurements)
     if vessel_mask is not None:
         return rasterized_mask & vessel_mask
     return rasterized_mask
@@ -41,6 +49,7 @@ def create_fundus_overlay(
     vessel_path: Optional[str] = None,
     circle_paths: Optional[Mapping[str, str]] = None,
     vessel_width_measurements: Optional[Sequence[Mapping[str, object]]] = None,
+    tortuosity_measurements: Optional[Sequence[Mapping[str, object]]] = None,
     fovea_location: Optional[Tuple[int, int]] = None,
     output_path: Optional[str] = None,
     overlay_config: Optional[OverlayConfig] = None,
@@ -55,6 +64,9 @@ def create_fundus_overlay(
         vessel_path: Optional path to binary vessel segmentation for clipping measurement overlays
         circle_paths: Optional mapping from circle names to binary circle-mask paths
         vessel_width_measurements: Optional sequence of kept width-measurement records to draw
+        tortuosity_measurements: Optional sequence of tortuosity records whose endpoint
+            chord lines should be drawn; when provided with vessel_path, the vessel
+            skeleton is also overlaid
         fovea_location: Optional (x,y) tuple indicating the location of the fovea
         output_path: Optional path to save the visualization image
         overlay_config: Overlay display configuration including enabled layers and colors
@@ -93,7 +105,9 @@ def create_fundus_overlay(
         output_img[disc_mask, :] = overlay_config.colors.disc
 
     for circle in overlay_config.circles:
-        circle_path = circle_paths.get(circle.name) if circle_paths is not None else None
+        circle_path = (
+            circle_paths.get(circle.name) if circle_paths is not None else None
+        )
         if circle_path:
             circle_mask = np.array(Image.open(circle_path)) > 0
             output_img[circle_mask, :] = circle.color
@@ -109,6 +123,16 @@ def create_fundus_overlay(
             vessel_mask=vessel_mask,
         )
         output_img[measurement_mask, :] = overlay_config.colors.vessel_width
+
+    if tortuosity_measurements:
+        if vessel_mask is not None:
+            vessel_skeleton_mask = skeletonize(vessel_mask)
+            output_img[vessel_skeleton_mask, :] = overlay_config.colors.vessel
+        tortuosity_mask = _rasterize_line_segments(
+            image_shape=output_img.shape[:2],
+            measurements=tortuosity_measurements,
+        )
+        output_img[tortuosity_mask, :] = overlay_config.colors.vessel
 
     # Convert to PIL image for drawing the fovea marker
     pil_img = Image.fromarray(output_img)
@@ -151,6 +175,7 @@ def batch_create_overlays(
     vessels_dir: Optional[Path] = None,
     circle_dirs: Optional[Mapping[str, Path]] = None,
     vessel_width_data: Optional[pd.DataFrame] = None,
+    tortuosity_data: Optional[pd.DataFrame] = None,
     fovea_data: Optional[Dict[str, Tuple[int, int]]] = None,
     overlay_config: Optional[OverlayConfig] = None,
 ) -> None:
@@ -165,6 +190,7 @@ def batch_create_overlays(
         vessels_dir: Optional directory containing vessel segmentations used to clip width overlays
         circle_dirs: Optional mapping from circle names to directories containing circle masks
         vessel_width_data: Optional dataframe containing kept width-measurement records
+        tortuosity_data: Optional dataframe containing tortuosity segment records
         fovea_data: Optional dictionary mapping image IDs to fovea coordinates
         overlay_config: Overlay display configuration including enabled layers and colors
 
@@ -178,6 +204,10 @@ def batch_create_overlays(
     if vessel_width_data is not None and not vessel_width_data.empty:
         for image_id, group in vessel_width_data.groupby("image_id"):
             measurements_by_image[str(image_id)] = group.to_dict(orient="records")
+    tortuosities_by_image: dict[str, list[dict[str, object]]] = {}
+    if tortuosity_data is not None and not tortuosity_data.empty:
+        for image_id, group in tortuosity_data.groupby("image_id"):
+            tortuosities_by_image[str(image_id)] = group.to_dict(orient="records")
 
     # Get all RGB images
     rgb_files = list(rgb_dir.glob("*.png"))
@@ -236,6 +266,7 @@ def batch_create_overlays(
             vessel_path=vessel_file,
             circle_paths=circle_files,
             vessel_width_measurements=measurements_by_image.get(image_id),
+            tortuosity_measurements=tortuosities_by_image.get(image_id),
             fovea_location=fovea_location,
             output_path=str(output_file),
             overlay_config=overlay_config,

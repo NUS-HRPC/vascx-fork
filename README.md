@@ -86,55 +86,7 @@ Device selection defaults to `auto` (prefers `cuda`, then `mps`, then `cpu`). Re
 python -m vascx_models run DATA_PATH OUTPUT_PATH --config /path/to/config.yaml
 ```
 
-The repository ships with this `config.yaml`:
-
-```yaml
-overlay:
-  enabled: true
-  layers:
-    arteries: true
-    veins: true
-    disc: true
-    fovea: true
-    vessel_widths: true
-  colours:
-    artery: "#FF0000"
-    vein: "#0000FF"
-    vessel: "#00FF00"
-    disc: "#FFFFFF"
-    fovea: "#FFFF00"
-    vessel_widths: "#00FF00"
-  circles:
-    - name: "2r"
-      diameter: 2.0
-      color: "#00FF00"
-    - name: "3r"
-      diameter: 3.0
-      color: "#00FF00"
-vessel_widths:
-  inner_circle: "2r"
-  outer_circle: "3r"
-  samples_per_connection: 5 # <0 measures every interior path pixel, excluding endpoints
-  method: "mask"
-  pvbm_mask:
-    direction_lag_px: 6.0
-    max_asymmetry_px: 1.0
-  profile:
-    image_source: "preprocessed_rgb"
-    channel: "green"
-    half_length_px: 20.0
-    sample_step_px: 0.25
-    smoothing_sigma_px: 1.0
-    boundary_method: "half_depth"
-    threshold_alpha: 0.5
-    min_contrast: 0.05
-    min_width_px: 1.0
-    max_width_px: 80.0
-    use_mask_guardrail: true
-    mask_guardrail_min_ratio: 0.4
-    mask_guardrail_max_ratio: 2.5
-    fallback_to_mask: false
-```
+The repository root ships with a fully commented [config.yaml](/Users/yifei/repos/vascx-fork/config.yaml). Use that file as the source of truth for the current defaults and the valid values for each setting.
 
 Vessel widths are sampled between the configured inner and outer disc circles.
 Each retained vessel connection receives `samples_per_connection` interior
@@ -151,12 +103,20 @@ excluding the start and end pixels.
 
 The `profile` backend uses the mask width only as a guardrail/reference. CRAE/CRVE aggregation continues to use the per-sample `width_px` values emitted by the active backend.
 
-Fork handling is intentionally trunk-focused:
+Width measurement remains trunk-focused:
 
 - vessel components must be traceable from the inner circle to the outer circle
 - dead-end side branches are discarded
 - for a fork inside the annulus, only the pre-fork trunk segment is measured
 - downstream daughter branches are not measured for width or CRAE/CRVE selection
+
+Tortuosity measurement is handled separately and uses a different correspondence rule:
+
+- artery and vein masks are traced independently inside the configured tortuosity annulus
+- direct 1-to-1 segments are measured directly
+- valid 1-to-many bifurcations are split into a trunk segment plus child segments
+- ambiguous many-to-1 or many-to-many patterns are discarded
+- tortuosity summaries are length-weighted by `path_length_px`
 
 ## Outputs
 
@@ -168,11 +128,13 @@ OUTPUT_PATH/
 ├── disc/
 ├── disc_circles/      # one subdirectory per configured circle name
 ├── overlays/
-├── vessel_equivalent_overlays/
+├── vessel_width_overlays/
+├── vessel_tortuosity_overlays/
 ├── bounds.csv
 ├── disc_geometry.csv
 ├── vessel_widths.csv
 ├── vessel_tortuosities.csv
+├── vessel_tortuosity_summary.csv
 ├── vessel_equivalents.csv
 ├── quality.csv
 └── fovea.csv
@@ -187,8 +149,11 @@ Key CSV outputs:
   endpoints (`x_start`, `y_start`, `x_end`, `y_end`) for overlay rendering, plus
   method/provenance fields such as `width_method`, `normal_x`, `normal_y`,
   `mask_width_px`, `measurement_valid`, and `measurement_failure_reason`.
-- `vessel_tortuosities.csv`: per-vessel path tortuosity, computed as skeleton
-  path length divided by endpoint chord length for each retained vessel trace.
+- `vessel_tortuosities.csv`: per-segment tortuosity records, computed as skeleton
+  path length divided by endpoint chord length for each retained tortuosity segment.
+- `vessel_tortuosity_summary.csv`: per-image, per-vessel-type tortuosity summary,
+  including the number of retained segments, total retained path length, and a
+  length-weighted mean tortuosity (`TORTA` for arteries, `TORTV` for veins).
 - `vessel_equivalents.csv`: CRAE/CRVE summary per image and vessel type.
 
 Additional `vessel_widths.csv` columns include:
@@ -209,14 +174,14 @@ Additional `vessel_widths.csv` columns include:
 - `mean_widths_used_px`: semicolon-separated mean vessel widths in pixels.
 - `equivalent_px`: recursive Knudtson-Parr-Hubbard equivalent in pixels. This is
   `NaN` when fewer than two vessels are available for a type.
-- `mean_tortuosity_used`: mean tortuosity across the same top-width vessels used
-  for the CRAE/CRVE row.
 
 Overlay directories:
 
 - `overlays/`: standard segmentation and measurement overlay.
-- `vessel_equivalent_overlays/`: highlights only the width measurements from
+- `vessel_width_overlays/`: highlights only the width measurements from
   vessels selected for CRAE/CRVE calculation.
+- `vessel_tortuosity_overlays/`: processed RGB overlaid with a green vessel
+  skeleton and the Euclidean endpoint chords for retained tortuosity segments.
 
 The CRAE/CRVE values are pixel-space equivalents unless you apply an external
 pixel-to-length calibration.
@@ -231,8 +196,9 @@ from an existing pipeline output. The source directory must contain:
 - `disc_geometry.csv`
 
 The full source output directory is copied into the requested new output
-directory, then `vessel_widths.csv`, `vessel_tortuosities.csv`, and
-`vessel_equivalents.csv` are recomputed there. When no destination is provided,
+directory, then `vessel_widths.csv`, `vessel_tortuosities.csv`,
+`vessel_tortuosity_summary.csv`, `vessel_equivalents.csv`, and the overlay
+directories are refreshed there. When no destination is provided,
 `vessel-metrics` creates a standard `output_YYYYMMDD_HHMMSS` folder in the
 current working directory. The destination must be new or empty, and it cannot
 be inside the source output directory.

@@ -10,6 +10,7 @@ from PIL import Image
 from .config import OverlayCircle, VesselWidthConfig
 from .profile_widths import measure_profile_width
 from .pvbm_widths import measure_pvbm_mask_width
+from .vessel_masks import typed_vessel_masks
 from .vessel_paths import (
     interpolate_path_point,
     path_cumulative_lengths,
@@ -479,16 +480,6 @@ def _sample_targets_for_path(
     ]
 
 
-def _typed_vessel_masks(
-    vessel_mask: np.ndarray,
-    av_mask: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Split the vessel mask into artery and vein masks using the AV segmentation."""
-    artery_mask = vessel_mask & np.isin(av_mask, (1, 3))
-    vein_mask = vessel_mask & np.isin(av_mask, (2, 3))
-    return artery_mask, vein_mask
-
-
 def _width_records_for_image(
     image_id: str,
     vessel_mask: np.ndarray,
@@ -696,7 +687,7 @@ def measure_vessel_widths_between_disc_circle_pair(
                     "vessel_widths.profile.fallback_to_mask: true to allow fallback."
                 )
 
-        artery_mask, vein_mask = _typed_vessel_masks(vessel_mask, av_mask)
+        artery_mask, vein_mask = typed_vessel_masks(vessel_mask, av_mask)
         for typed_mask, vessel_type in ((artery_mask, "artery"), (vein_mask, "vein")):
             image_width_records = _width_records_for_image(
                 image_id=image_id,
@@ -809,7 +800,6 @@ def compute_revised_crx_from_widths(
     df_widths: pd.DataFrame,
     n_largest: int = 6,
     return_rounds: bool = False,
-    df_tortuosities: pd.DataFrame | None = None,
 ):
     """Aggregate per-connection mean widths and compute revised CRAE/CRVE.
 
@@ -823,11 +813,6 @@ def compute_revised_crx_from_widths(
     return_rounds:
         If True, also return the intermediate rounds from the revised algorithm
         for each image/vessel_type as a mapping.
-    df_tortuosities:
-        Optional one-row-per-vessel tortuosity table produced by
-        `measure_vessel_tortuosities_between_disc_circle_pair`. When
-        provided, the equivalent output includes the mean tortuosity of the
-        selected top-width vessels.
 
     Returns
     -------
@@ -836,8 +821,6 @@ def compute_revised_crx_from_widths(
         `(df_connections, df_equivalents, rounds_map)` when `return_rounds` is True.
         `df_connections` contains the per-connection mean widths and selection flags.
     """
-
-    include_tortuosity = df_tortuosities is not None
 
     cols_conn = [
         "image_id",
@@ -852,8 +835,6 @@ def compute_revised_crx_from_widths(
         "n_samples",
         "selected_for_equivalent",
     ]
-    if include_tortuosity:
-        cols_conn.append("tortuosity")
     cols_equiv = [
         "image_id",
         "metric",
@@ -865,8 +846,6 @@ def compute_revised_crx_from_widths(
         "mean_widths_used_px",
         "equivalent_px",
     ]
-    if include_tortuosity:
-        cols_equiv.append("mean_tortuosity_used")
 
     if df_widths.empty:
         df_conn_empty = pd.DataFrame(columns=cols_conn)
@@ -894,16 +873,6 @@ def compute_revised_crx_from_widths(
         lambda row: f"{row['vessel_type']}_{int(row['connection_index'])}",
         axis=1,
     )
-    if include_tortuosity:
-        tortuosity_lookup_cols = group_cols + ["tortuosity"]
-        if df_tortuosities.empty:
-            df_conn["tortuosity"] = float("nan")
-        else:
-            df_conn = df_conn.merge(
-                df_tortuosities[tortuosity_lookup_cols],
-                on=group_cols,
-                how="left",
-            )
     df_conn["selected_for_equivalent"] = False
     df_conn = df_conn[cols_conn]
 
@@ -931,8 +900,6 @@ def compute_revised_crx_from_widths(
             ),
             "equivalent_px": float("nan"),
         }
-        if include_tortuosity:
-            result["mean_tortuosity_used"] = float(top["tortuosity"].mean())
         try:
             if return_rounds:
                 eq, rounds = revised_vessel_equivalent(

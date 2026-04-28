@@ -427,28 +427,73 @@ def trace_vessel_paths_between_disc_circle_pair(
     return vessel_paths
 
 
-def _simple_paths_from_inner_to_outer(
+def _key_nodes_for_graph(
     graph: dict[tuple[int, int], list[tuple[int, int]]],
-    start: tuple[int, int],
-    outer_nodes: set[tuple[int, int]],
+    boundary_roles: dict[tuple[int, int], str],
+) -> set[tuple[int, int]]:
+    return {
+        node
+        for node, adjacent in graph.items()
+        if node in boundary_roles or len(adjacent) != 2
+    }
+
+
+def _rooted_key_node_segments(
+    graph: dict[tuple[int, int], list[tuple[int, int]]],
+    root: tuple[int, int],
+    boundary_roles: dict[tuple[int, int], str],
 ) -> list[np.ndarray]:
-    paths: list[np.ndarray] = []
-    stack: list[
-        tuple[tuple[int, int], tuple[tuple[int, int], ...], frozenset[tuple[int, int]]]
-    ] = [(start, (start,), frozenset((start,)))]
+    """Split a single-inner vessel tree into 1-to-1 key-node segments.
 
-    while stack:
-        current, path, visited = stack.pop()
-        if current in outer_nodes and current != start:
-            paths.append(np.asarray(path, dtype=float))
-            continue
+    Returns an empty list when the group is ambiguous, such as when it contains
+    cycles or merge patterns that prevent a unique outward traversal.
+    """
+    edge_count = sum(len(adjacent) for adjacent in graph.values()) // 2
+    if edge_count != len(graph) - 1:
+        return []
 
-        for neighbor in sorted(graph[current], reverse=True):
-            if neighbor in visited:
+    key_nodes = _key_nodes_for_graph(graph, boundary_roles)
+    parent_by_node: dict[tuple[int, int], tuple[int, int] | None] = {root: None}
+    traversal_stack = [root]
+
+    while traversal_stack:
+        node = traversal_stack.pop()
+        parent = parent_by_node[node]
+        for neighbor in graph[node]:
+            if neighbor == parent:
                 continue
-            stack.append((neighbor, path + (neighbor,), visited | {neighbor}))
+            if neighbor in parent_by_node:
+                return []
+            parent_by_node[neighbor] = node
+            traversal_stack.append(neighbor)
 
-    return paths
+    child_by_node: dict[tuple[int, int], list[tuple[int, int]]] = {
+        node: [] for node in graph
+    }
+    for node, parent in parent_by_node.items():
+        if parent is not None:
+            child_by_node[parent].append(node)
+    for children in child_by_node.values():
+        children.sort()
+
+    segments: list[np.ndarray] = []
+    key_stack = [root]
+    while key_stack:
+        start = key_stack.pop()
+        for child in reversed(child_by_node[start]):
+            path = [start, child]
+            current = child
+            while current not in key_nodes:
+                children = child_by_node[current]
+                if len(children) != 1:
+                    return []
+                current = children[0]
+                path.append(current)
+
+            segments.append(np.asarray(path, dtype=float))
+            key_stack.append(current)
+
+    return segments
 
 
 def trace_vessel_tortuosity_paths_between_disc_circle_pair(
@@ -458,7 +503,13 @@ def trace_vessel_tortuosity_paths_between_disc_circle_pair(
     outer_radius_px: float,
     boundary_tolerance_px: float,
 ) -> list[VesselPath]:
-    """Return full inner-to-outer skeleton paths, including 1-to-n fork paths."""
+    """Return 1-to-1 tortuosity segments within the annulus.
+
+    Components are only measured when they form a single-inner rooted tree. This
+    keeps direct 1-to-1 segments and splits valid 1-to-many bifurcations into
+    base and child branches, while discarding ambiguous n-to-1 and n-to-n
+    patterns.
+    """
     if not np.any(vessel_mask):
         return []
     if outer_radius_px <= inner_radius_px:
@@ -486,12 +537,8 @@ def trace_vessel_tortuosity_paths_between_disc_circle_pair(
             outer_radius_px=outer_radius_px,
             boundary_tolerance_px=boundary_tolerance_px,
         )
-        inner_nodes = {
-            node for node, role in boundary_roles.items() if role == "inner"
-        }
-        outer_nodes = {
-            node for node, role in boundary_roles.items() if role == "outer"
-        }
+        inner_nodes = {node for node, role in boundary_roles.items() if role == "inner"}
+        outer_nodes = {node for node, role in boundary_roles.items() if role == "outer"}
         if not inner_nodes or not outer_nodes:
             continue
 
@@ -500,39 +547,38 @@ def trace_vessel_tortuosity_paths_between_disc_circle_pair(
         for group in connected_node_groups(active_graph):
             group_inner_nodes = sorted(inner_nodes & group)
             group_outer_nodes = outer_nodes & group
-            if not group_inner_nodes or not group_outer_nodes:
+            if len(group_inner_nodes) != 1 or not group_outer_nodes:
                 continue
 
             group_graph = active_subgraph(active_graph, group)
-            for start in group_inner_nodes:
-                for path_yx in _simple_paths_from_inner_to_outer(
-                    group_graph,
-                    start=start,
-                    outer_nodes=group_outer_nodes,
-                ):
-                    if len(path_yx) > 1:
-                        keep = np.concatenate(
-                            ([True], np.any(np.diff(path_yx, axis=0) != 0, axis=1))
-                        )
-                        path_yx = path_yx[keep]
-                    path_xy = path_yx[:, ::-1]
-                    cumulative_lengths = path_cumulative_lengths(path_xy)
-                    if len(cumulative_lengths) == 0 or cumulative_lengths[-1] <= 0.0:
-                        continue
-
-                    path_skeleton = np.zeros_like(skeleton, dtype=bool)
-                    segment_rows = path_yx[:, 0].astype(int)
-                    segment_cols = path_yx[:, 1].astype(int)
-                    path_skeleton[segment_rows, segment_cols] = True
-
-                    connection_index += 1
-                    vessel_paths.append(
-                        VesselPath(
-                            connection_index=connection_index,
-                            path_xy=path_xy,
-                            path_yx=path_yx,
-                            skeleton=path_skeleton,
-                        )
+            for path_yx in _rooted_key_node_segments(
+                group_graph,
+                root=group_inner_nodes[0],
+                boundary_roles=boundary_roles,
+            ):
+                if len(path_yx) > 1:
+                    keep = np.concatenate(
+                        ([True], np.any(np.diff(path_yx, axis=0) != 0, axis=1))
                     )
+                    path_yx = path_yx[keep]
+                path_xy = path_yx[:, ::-1]
+                cumulative_lengths = path_cumulative_lengths(path_xy)
+                if len(cumulative_lengths) == 0 or cumulative_lengths[-1] <= 0.0:
+                    continue
+
+                path_skeleton = np.zeros_like(skeleton, dtype=bool)
+                segment_rows = path_yx[:, 0].astype(int)
+                segment_cols = path_yx[:, 1].astype(int)
+                path_skeleton[segment_rows, segment_cols] = True
+
+                connection_index += 1
+                vessel_paths.append(
+                    VesselPath(
+                        connection_index=connection_index,
+                        path_xy=path_xy,
+                        path_yx=path_yx,
+                        skeleton=path_skeleton,
+                    )
+                )
 
     return vessel_paths
