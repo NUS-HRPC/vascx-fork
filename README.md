@@ -62,6 +62,8 @@ SKIP_ENV=1 ./setup.sh --tested      # skip conda env creation
 
 ## Running The Pipeline
 
+For a code-level walkthrough of the full pipeline, with extra detail on disc geometry, vessel path tracing, metrics, and overlays, see [docs/pipeline/README.md](docs/pipeline/README.md).
+
 Use any one of the following commands:
 
 ```bash
