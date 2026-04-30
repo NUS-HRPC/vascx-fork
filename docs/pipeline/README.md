@@ -25,6 +25,171 @@ If you want a runnable code example of the same sequence, see `tests/test_e2e.py
 11. Run fovea detection.
 12. Render overlays and write all outputs.
 
+## Mermaid Flowchart
+
+```mermaid
+flowchart TD
+	A["CLI entrypoint<br/>python -m vascx_models run DATA_PATH OUTPUT_PATH"] --> B["Bootstrap runtime<br/>configure_runtime_environment()"]
+	B --> C["Load config and bind dependencies<br/>cli.run() + load_app_config() + _pipeline_dependencies()"]
+	C --> D["Create output directories and enable stages<br/>run_pipeline()"]
+	D --> E["Resolve inputs<br/>directory scan or CSV path/id list"]
+	E --> F{"Preprocess enabled?"}
+
+	F -->|Yes| G["Preprocess fundus images<br/>write preprocessed_rgb/ and bounds.csv"]
+	F -->|No| H["Use original images directly"]
+	G --> I["Resolve device<br/>auto -> CUDA -> MPS -> CPU"]
+	H --> I
+
+	I --> J{"Quality enabled?"}
+	J -->|Yes| K["Run quality estimation<br/>write quality.csv"]
+	J -->|No| L["Skip quality"]
+	K --> M{"Vessels enabled?"}
+	L --> M
+
+	M -->|Yes| N["Run vessel and AV segmentation<br/>write vessels/ and artery_vein/"]
+	M -->|No| O["Skip vessel segmentation"]
+	N --> P{"Disc enabled?"}
+	O --> P
+
+	P -->|Yes| Q["Run disc segmentation<br/>write disc/"]
+	P -->|No| R["Skip disc segmentation"]
+	Q --> S["Estimate disc geometry<br/>disc center = foreground mean<br/>disc radius = equivalent-circle radius"]
+	S --> T["Generate disc-centered circles<br/>write disc_geometry.csv and disc_circles/"]
+	R --> U
+	T --> U["Metric orchestration<br/>compute_and_save_vessel_metrics()"]
+
+	U --> V{"Any metric family enabled?"}
+	V -->|No| W["Skip width, tortuosity, branching"]
+	V -->|Yes| X["Resolve inner/outer circles<br/>remove stale metric outputs"]
+
+	X --> Y["Split vessel mask by type<br/>artery mask and vein mask"]
+	Y --> Z["All metric families work inside a disc-centered annulus<br/>between configured inner and outer circles"]
+
+	Z --> AA["Width path tracing<br/>skeletonize -> keep annulus pixels -> connected components -> boundary nodes -> prune dead ends -> retain inner-to-outer trunk paths"]
+	AA --> AB["Width sampling<br/>interior samples -> local tangent -> normal -> trace to mask boundaries -> width_px + endpoints"]
+	AB --> AC["Width aggregation<br/>mean width per connection -> select largest vessels -> compute CRAE/CRVE"]
+	AC --> AD["Write width outputs<br/>vessel_widths.csv + vessel_widths_summary.csv"]
+
+	Z --> AE["Tortuosity path tracing<br/>skeletonize -> keep annulus pixels -> require single-inner rooted tree -> split into 1-to-1 segments -> discard ambiguous merges/cycles"]
+	AE --> AF["Tortuosity calculation<br/>path length / chord length"]
+	AF --> AG["Length-weighted summary<br/>TORTA / TORTV"]
+	AG --> AH["Write tortuosity outputs<br/>vessel_tortuosities.csv + vessel_tortuosity_summary.csv"]
+
+	Z --> AI["Branching path tracing<br/>skeletonize -> keep annulus pixels -> require single-inner root -> find 1-parent-to-2-daughter bifurcations"]
+	AI --> AJ["Branch measurement<br/>sample parent/daughter widths -> branch angle -> branching coefficient"]
+	AJ --> AK["Write branching outputs<br/>vessel_branching.csv + vessel_branching_widths.csv"]
+
+	AD --> AL
+	AH --> AL
+	AK --> AL
+	W --> AL
+
+	AL{"Fovea enabled?"}
+	AL -->|Yes| AM["Run fovea detection<br/>write fovea.csv"]
+	AL -->|No| AN["Skip fovea"]
+
+	AM --> AO{"Overlay enabled?"}
+	AN --> AO
+
+	AO -->|Yes| AP["Render overlays<br/>base overlay + metric-specific overlays"]
+	AO -->|No| AQ["Skip overlays"]
+
+	AP --> AR["Overlay drawing logic<br/>RGB + AV + disc + circles + width lines + tortuosity segments/chords + branching markers/angles + fovea"]
+	AR --> AS["Write overlays/<br/>vessel_width_overlays/<br/>vessel_tortuosity_overlays/<br/>vessel_branching_overlays/"]
+	AQ --> AT["Pipeline complete"]
+	AS --> AT
+```
+
+## Formula Reference
+
+This pipeline is driven by a small set of geometric and summary formulas.
+
+### Disc radius from disc mask area
+
+The disc radius used for circle generation is the equivalent-circle radius derived from the foreground disc area:
+
+$$
+r_{disc} = \sqrt{\frac{A_{disc}}{\pi}}
+$$
+
+where $A_{disc}$ is the number of foreground disc pixels.
+
+### Configured circle radii
+
+Each configured disc-centered circle radius is a multiple of the estimated disc radius:
+
+$$
+r_{circle} = r_{disc} \cdot d_{circle}
+$$
+
+where $d_{circle}$ is the configured circle diameter multiplier such as $2$, $3$, or $5$.
+
+### Vessel width from boundary intersections
+
+For mask-based widths, each sample point is projected along the local normal direction until the two vessel boundaries are found. If the positive and negative boundary distances are $t_+$ and $t_-$, then:
+
+$$
+w = t_+ + t_-
+$$
+
+### Tortuosity of one retained segment
+
+Tortuosity is defined as path length divided by chord length:
+
+$$
+\operatorname{tortuosity} = \frac{L_{path}}{L_{chord}}
+$$
+
+with
+
+$$
+L_{path} = \sum_{i=1}^{n-1} \left\| p_{i+1} - p_i \right\|_2
+$$
+
+and
+
+$$
+L_{chord} = \left\| p_n - p_1 \right\|_2
+$$
+
+### Length-weighted tortuosity summary
+
+The summary tortuosity per image and vessel type is length-weighted:
+
+$$
+\overline{T}_{weighted} = \frac{\sum_i T_i L_i}{\sum_i L_i}
+$$
+
+where $T_i$ is the segment tortuosity and $L_i$ is the segment path length.
+
+### Branching coefficient
+
+For a retained bifurcation with one parent width and two daughter widths:
+
+$$
+BC = \frac{w_{d1}^2 + w_{d2}^2}{w_p^2}
+$$
+
+where $w_p$ is the parent width and $w_{d1}, w_{d2}$ are the daughter widths.
+
+### Branching angle
+
+The daughter-branch angle is the angle between the two daughter direction vectors:
+
+$$
+angle = \cos^{-1} \left( \frac{v_1 \cdot v_2}{\left\|v_1\right\| \left\|v_2\right\|} \right)
+$$
+
+### Revised vessel equivalent recursion
+
+For CRAE and CRVE aggregation, the revised recursive combination used in the code is:
+
+$$
+w_{combined} = c \sqrt{w_{large}^2 + w_{small}^2}
+$$
+
+with $c = 0.88$ for arteries and $c = 0.95$ for veins.
+
 ## Stage By Stage
 
 ### 1. Runtime bootstrap
@@ -168,6 +333,12 @@ Processing logic:
 5. A one-pixel-thick circle mask is rasterized and saved.
 6. The numeric disc center, disc radius, and derived circle radii are stored in `disc_geometry.csv`.
 
+Formula:
+
+$$
+r_{disc} = \sqrt{\frac{A_{disc}}{\pi}}, \qquad r_{circle} = r_{disc} \cdot d_{circle}
+$$
+
 Why this matters:
 
 - Every downstream vessel metric is defined relative to this disc-centered coordinate system.
@@ -271,6 +442,14 @@ Processing logic:
 7. Use the two boundary points to compute the final width.
 8. Save not just the width, but also the measurement line endpoints and diagnostic fields.
 
+Formula:
+
+$$
+w = t_+ + t_-
+$$
+
+where $t_+$ and $t_-$ are the traced distances from the sample point to the two vessel boundaries along the local normal.
+
 If `vessel_widths.method` is `profile`, the same traced geometry is used, but the width is estimated from an image-intensity profile rather than only from the mask. The path-tracing rule is still the gatekeeper for what gets measured.
 
 ### 12.4 Aggregating widths into CRAE and CRVE
@@ -287,6 +466,14 @@ Processing logic:
 4. Select up to the largest six vessels for each type.
 5. Apply the revised Knudtson-style recursive equivalent formula.
 6. Save the per-connection table and the artery or vein equivalent summary.
+
+Formula used by the implementation:
+
+$$
+w_{combined} = c \sqrt{w_{large}^2 + w_{small}^2}
+$$
+
+with $c = 0.88$ for arteries and $c = 0.95$ for veins.
 
 The summary file is written to `vessel_widths_summary.csv`, even though the metric names inside it are `CRAE` and `CRVE`.
 
@@ -332,6 +519,19 @@ For each retained path segment:
 3. Compute tortuosity as `path_length / chord_length`.
 4. Save the segment endpoints, path length, chord length, tortuosity, and vessel type.
 
+Formula:
+
+$$
+\operatorname{tortuosity} = \frac{L_{path}}{L_{chord}}
+$$
+
+where
+
+$$
+L_{path} = \sum_{i=1}^{n-1} \left\| p_{i+1} - p_i \right\|_2, \qquad
+L_{chord} = \left\| p_n - p_1 \right\|_2
+$$
+
 ### 13.3 Summarizing tortuosity
 
 The summary stage groups segments by image and vessel type.
@@ -344,6 +544,12 @@ Processing logic:
 4. Sum retained path length.
 5. Compute a length-weighted mean tortuosity.
 6. Emit `TORTA` for arteries and `TORTV` for veins.
+
+Formula:
+
+$$
+\overline{T}_{weighted} = \frac{\sum_i T_i L_i}{\sum_i L_i}
+$$
 
 This summary is written to `vessel_tortuosity_summary.csv`.
 
@@ -392,6 +598,18 @@ Once a bifurcation is retained:
 4. Take the median valid width for the parent and for each daughter.
 5. Compute the angle between the two daughter branch directions.
 6. Compute the branching coefficient as `(daughter_1_width^2 + daughter_2_width^2) / parent_width^2` when the parent width is valid.
+
+Formulas:
+
+$$
+BC = \frac{w_{d1}^2 + w_{d2}^2}{w_p^2}
+$$
+
+and
+
+$$
+angle = \cos^{-1} \left( \frac{v_1 \cdot v_2}{\left\|v_1\right\| \left\|v_2\right\|} \right)
+$$
 
 The stage writes:
 
