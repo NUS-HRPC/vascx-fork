@@ -217,14 +217,19 @@ from an existing pipeline output. The source directory must contain:
 - `artery_vein/`
 - `disc_geometry.csv`
 
-The full source output directory is copied into the requested new output
-directory, then `vessel_widths.csv`, `vessel_tortuosities.csv`,
+Only the base intermediates needed for recomputation are copied. Required
+inputs are copied, and optional `disc/`, `preprocessed_rgb/`, and `fovea.csv`
+are copied when present for circle and overlay rendering. Metric CSVs,
+`disc_circles/`, overlays, quality outputs, and preprocessing bounds are
+regenerated or omitted in the destination.
+
+The command then writes fresh `vessel_widths.csv`, `vessel_tortuosities.csv`,
 `vessel_tortuosity_summary.csv`, `vessel_branching.csv`,
-`vessel_branching_widths.csv`, `vessel_widths_summary.csv`, and the overlay
-directories are refreshed there. When no destination is provided,
-`vessel-metrics` creates a standard `output_YYYYMMDD_HHMMSS` folder in the
-current working directory. The destination must be new or empty, and it cannot
-be inside the source output directory.
+`vessel_branching_widths.csv`, `vessel_widths_summary.csv`, and refreshed
+metric overlay directories. When no destination is provided, `vessel-metrics`
+creates a standard `output_YYYYMMDD_HHMMSS` folder in the current working
+directory. The destination must be new or empty, and it cannot be inside the
+source output directory.
 
 ## Testing
 

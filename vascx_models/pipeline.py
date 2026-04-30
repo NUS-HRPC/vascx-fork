@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 VESSEL_METRIC_INTERMEDIATE_DIRS = ("vessels", "artery_vein")
 VESSEL_METRIC_INTERMEDIATE_FILES = ("disc_geometry.csv",)
+VESSEL_METRIC_OPTIONAL_BASE_DIRS = ("disc", "preprocessed_rgb")
+VESSEL_METRIC_OPTIONAL_BASE_FILES = ("fovea.csv",)
 
 
 @dataclass(frozen=True)
@@ -57,12 +59,18 @@ def copy_pipeline_output_for_vessel_metrics(
             "Missing required intermediate output(s): " + ", ".join(missing)
         )
 
-    for item in source_output_path.iterdir():
-        destination = output_path / item.name
-        if item.is_dir():
-            shutil.copytree(item, destination)
-        else:
-            shutil.copy2(item, destination)
+    for dirname in (*VESSEL_METRIC_INTERMEDIATE_DIRS, *VESSEL_METRIC_OPTIONAL_BASE_DIRS):
+        source = source_output_path / dirname
+        if source.is_dir():
+            shutil.copytree(source, output_path / dirname)
+
+    for filename in (
+        *VESSEL_METRIC_INTERMEDIATE_FILES,
+        *VESSEL_METRIC_OPTIONAL_BASE_FILES,
+    ):
+        source = source_output_path / filename
+        if source.is_file():
+            shutil.copy2(source, output_path / filename)
 
     return (
         output_path / "vessels",

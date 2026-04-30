@@ -23,6 +23,7 @@ def _write_minimal_vessel_metric_intermediates(source_dir: Path) -> None:
     (av_dir / "sample.png").write_bytes(b"av")
     (preprocessed_dir / "sample.png").write_bytes(b"rgb")
     (source_dir / "quality.csv").write_text("image_id,q1,q2,q3\n", encoding="utf-8")
+    (source_dir / "bounds.csv").write_text("image_id,x0,y0,x1,y1\n", encoding="utf-8")
     (source_dir / "vessel_widths.csv").write_text("stale\n", encoding="utf-8")
     pd.DataFrame(
         {
@@ -455,6 +456,13 @@ def test_run_vessel_metrics_pipeline_copies_source_output_and_writes_outputs(
     _write_minimal_vessel_metric_intermediates(source_dir)
     (source_dir / "disc").mkdir()
     (source_dir / "disc" / "sample.png").write_bytes(b"disc")
+    pd.DataFrame(
+        {
+            "x_fovea": [12],
+            "y_fovea": [13],
+        },
+        index=["sample"],
+    ).to_csv(source_dir / "fovea.csv")
     (source_dir / "disc_circles").mkdir()
     (source_dir / "disc_circles" / "stale.txt").write_text("stale", encoding="utf-8")
     (source_dir / "overlays").mkdir()
@@ -719,9 +727,11 @@ def test_run_vessel_metrics_pipeline_copies_source_output_and_writes_outputs(
     assert (output_dir / "vessels" / "sample.png").read_bytes() == b"vessel"
     assert (output_dir / "artery_vein" / "sample.png").read_bytes() == b"av"
     assert (output_dir / "preprocessed_rgb" / "sample.png").read_bytes() == b"rgb"
-    assert (output_dir / "quality.csv").read_text(
-        encoding="utf-8"
-    ) == "image_id,q1,q2,q3\n"
+    assert (output_dir / "disc" / "sample.png").read_bytes() == b"disc"
+    assert not (output_dir / "quality.csv").exists()
+    assert not (output_dir / "bounds.csv").exists()
+    assert (output_dir / "vessel_widths.csv").read_text(encoding="utf-8") != "stale\n"
+    assert (output_dir / "fovea.csv").exists()
     assert calls["generate_disc_circles"]["disc_dir"] == output_dir / "disc"
     assert (
         calls["generate_disc_circles"]["circle_output_dir"]
@@ -745,6 +755,7 @@ def test_run_vessel_metrics_pipeline_copies_source_output_and_writes_outputs(
     assert calls["measure_vessel_branching"]["av_dir"] == output_dir / "artery_vein"
     assert len(calls["batch_create_overlays"]) == 4
     assert calls["batch_create_overlays"][0]["output_dir"] == output_dir / "overlays"
+    assert calls["batch_create_overlays"][0]["fovea_data"] == {"sample": (12, 13)}
     assert (
         calls["batch_create_overlays"][1]["output_dir"]
         == output_dir / "vessel_tortuosity_overlays"
@@ -887,7 +898,8 @@ def test_run_vessel_metrics_pipeline_uses_timestamped_output_when_omitted(
 
     assert created_output_dir.exists()
     assert (created_output_dir / "vessels" / "sample.png").read_bytes() == b"vessel"
-    assert (created_output_dir / "quality.csv").exists()
+    assert not (created_output_dir / "quality.csv").exists()
+    assert (created_output_dir / "preprocessed_rgb" / "sample.png").read_bytes() == b"rgb"
 
 
 def test_run_vessel_metrics_pipeline_rejects_nonempty_output(tmp_path: Path) -> None:
