@@ -8,6 +8,7 @@ from PIL import Image
 from vascx_models.config import OverlayCircle
 from vascx_models.metrics.vessel_tortuosities import (
     compute_path_tortuosity,
+    curvature_tortuosity,
     measure_vessel_tortuosities_between_disc_circle_pair,
     summarize_vessel_tortuosities,
     vessel_tortuosity_record,
@@ -33,6 +34,66 @@ def test_compute_path_tortuosity_uses_path_length_over_chord() -> None:
     assert path_length_px == pytest.approx(8.0)
     assert chord_length_px == pytest.approx(np.hypot(6.0, 4.0))
     assert tortuosity == pytest.approx(8.0 / np.hypot(6.0, 4.0))
+
+
+def test_curvature_tortuosity_computes_mean_squared_curvature() -> None:
+    path_xy = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    assert curvature_tortuosity(path_xy) == pytest.approx(1.774002332608633)
+
+
+def test_compute_path_tortuosity_supports_curvature_method() -> None:
+    path_xy = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    path_length_px, chord_length_px, tortuosity = compute_path_tortuosity(
+        path_xy,
+        method="curvature",
+    )
+
+    assert path_length_px == pytest.approx(2.0)
+    assert chord_length_px == pytest.approx(np.sqrt(2.0))
+    assert tortuosity == pytest.approx(1.774002332608633)
+
+
+def test_curvature_tortuosity_returns_zero_for_straight_line() -> None:
+    path_xy = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    assert curvature_tortuosity(path_xy) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_curvature_tortuosity_ignores_consecutive_duplicate_points() -> None:
+    path_xy = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    assert curvature_tortuosity(path_xy) == pytest.approx(1.774002332608633)
 
 
 def test_vessel_tortuosity_record_uses_ordered_path_endpoints() -> None:
@@ -61,6 +122,26 @@ def test_vessel_tortuosity_record_uses_ordered_path_endpoints() -> None:
     assert record["x_end"] == 16.0
     assert record["y_end"] == 24.0
     assert record["tortuosity"] == pytest.approx(8.0 / np.hypot(6.0, 4.0))
+
+
+def test_vessel_tortuosity_record_uses_configured_method() -> None:
+    inner_circle = OverlayCircle(name="2r", diameter=2.0)
+    outer_circle = OverlayCircle(name="3r", diameter=3.0)
+    path_xy = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], dtype=float)
+
+    record = vessel_tortuosity_record(
+        image_id="sample",
+        vessel_type="artery",
+        inner_circle=inner_circle,
+        outer_circle=outer_circle,
+        inner_radius_px=40.0,
+        outer_radius_px=60.0,
+        connection_index=7,
+        path_xy=path_xy,
+        method="curvature",
+    )
+
+    assert record["tortuosity"] == pytest.approx(1.774002332608633)
 
 
 def test_measure_vessel_tortuosities_between_disc_circle_pair_writes_vessel_tortuosity(

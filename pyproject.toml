@@ -18,6 +18,7 @@ dependencies = [
     "click==8.*",
     "PyYAML==6.*",
     "pydantic>=2.0",
+    "scipy",
     "scikit-image",
     "PyMuPDF",
     "huggingface_hub",

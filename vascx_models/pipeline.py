@@ -555,6 +555,7 @@ def compute_and_save_vessel_metrics(
                     inner_circle=tortuosity_inner_circle,
                     outer_circle=tortuosity_outer_circle,
                     output_path=vessel_tortuosities_path,
+                    method=app_config.vessel_tortuosities.method,
                 )
             )
             df_vessel_tortuosity_summary = deps.summarize_vessel_tortuosities(

@@ -106,6 +106,7 @@ class VesselTortuosityConfig:
     enabled: bool = True
     inner_circle: str | None = "2r"
     outer_circle: str | None = "5r"
+    method: str = "simple"
 
 
 @dataclass(frozen=True)

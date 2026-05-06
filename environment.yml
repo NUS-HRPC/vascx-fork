@@ -12,6 +12,7 @@ dependencies:
   - pyyaml=6
   - tqdm=4
   - pytest
+  - scipy
   - scikit-image
   - pip:
       - huggingface_hub

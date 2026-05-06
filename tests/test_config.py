@@ -95,6 +95,7 @@ def test_load_app_config_accepts_vessel_width_sampling_options(tmp_path: Path) -
                 "  enabled: true",
                 "  inner_circle: 3r",
                 "  outer_circle: 5r",
+                "  method: curvature",
                 "vessel_branching:",
                 "  enabled: false",
             ]
@@ -115,6 +116,7 @@ def test_load_app_config_accepts_vessel_width_sampling_options(tmp_path: Path) -
     assert app_config.vessel_tortuosities.enabled is True
     assert app_config.vessel_tortuosities.inner_circle == "3r"
     assert app_config.vessel_tortuosities.outer_circle == "5r"
+    assert app_config.vessel_tortuosities.method == "curvature"
     assert [circle.name for circle in app_config.overlay.circles] == ["3r", "5r"]
     assert [circle.color for circle in app_config.overlay.circles] == [
         (17, 34, 51),
@@ -335,4 +337,22 @@ def test_load_app_config_rejects_invalid_vessel_width_method(tmp_path: Path) -> 
     )
 
     with pytest.raises(ValueError, match="vessel_widths.method"):
+        load_app_config(config_path)
+
+
+def test_load_app_config_rejects_invalid_vessel_tortuosity_method(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "vessel_tortuosities:",
+                "  method: unsupported",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="vessel_tortuosities.method"):
         load_app_config(config_path)

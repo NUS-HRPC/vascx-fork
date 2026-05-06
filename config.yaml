@@ -67,6 +67,7 @@ vessel_tortuosities:
   enabled: true # true|false; compute vessel_tortuosities.csv, vessel_tortuosity_summary.csv, and vessel_tortuosity_overlays/
   inner_circle: "2r" # circle names must use the '<multiplier>r' format
   outer_circle: "5r" # must be larger than inner_circle
+  method: "curvature" # "simple" (path/chord) or "curvature" (B-spline mean squared curvature along arc length)
 
 ####################
 # Vessel Branching #

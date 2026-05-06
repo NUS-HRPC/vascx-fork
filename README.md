@@ -123,6 +123,11 @@ Tortuosity measurement is handled separately and uses a different correspondence
 - ambiguous many-to-1 or many-to-many patterns are discarded
 - tortuosity summaries are length-weighted by `path_length_px`
 
+`vessel_tortuosities.method` selects the calculation used for each retained
+segment. `simple` keeps the existing path-length divided by chord-length
+calculation. `curvature` computes B-spline mean squared curvature along arc
+length.
+
 Branching measurement is also handled separately:
 
 - artery and vein masks are traced independently inside the configured branching annulus
@@ -165,8 +170,8 @@ Key CSV outputs:
   endpoints (`x_start`, `y_start`, `x_end`, `y_end`) for overlay rendering, plus
   method/provenance fields such as `width_method`, `normal_x`, `normal_y`,
   `mask_width_px`, `measurement_valid`, and `measurement_failure_reason`.
-- `vessel_tortuosities.csv`: per-segment tortuosity records, computed as skeleton
-  path length divided by endpoint chord length for each retained tortuosity segment.
+- `vessel_tortuosities.csv`: per-segment tortuosity records, computed with the
+  configured `vessel_tortuosities.method` for each retained tortuosity segment.
 - `vessel_tortuosity_summary.csv`: per-image, per-vessel-type tortuosity summary,
   including the number of retained segments, number of unique segment start
   points, total retained path length, and a length-weighted mean tortuosity

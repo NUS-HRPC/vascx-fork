@@ -310,6 +310,7 @@ def test_run_pipeline_passes_measurement_config_and_data_to_overlays(
             "  enabled: true",
             "  inner_circle: 2r",
             "  outer_circle: 5r",
+            "  method: curvature",
             "vessel_branching:",
             "  enabled: true",
             "  inner_circle: 2r",
@@ -346,6 +347,7 @@ def test_run_pipeline_passes_measurement_config_and_data_to_overlays(
     assert calls["measure_vessel_tortuosities"]["output_path"] == (
         output_dir / "vessel_tortuosities.csv"
     )
+    assert calls["measure_vessel_tortuosities"]["method"] == "curvature"
     assert calls["measure_vessel_widths"]["samples_per_connection"] == 4
     assert calls["measure_vessel_widths"]["boundary_tolerance_px"] == 2.5
     assert calls["measure_vessel_widths"]["tangent_window_px"] == 11.0

@@ -412,6 +412,7 @@ class _VesselTortuosityConfig(_ConfigModel):
     enabled: bool = True
     inner_circle: str | None = "2r"
     outer_circle: str | None = "5r"
+    method: str = "simple"
 
     @model_validator(mode="before")
     @classmethod
@@ -428,11 +429,21 @@ class _VesselTortuosityConfig(_ConfigModel):
     def validate_circle_name(cls, value: Any, info: Any) -> str | None:
         return _optional_string(value, f"vessel_tortuosities.{info.field_name}")
 
+    @field_validator("method", mode="before")
+    @classmethod
+    def validate_method(cls, value: Any) -> str:
+        return _choice(
+            value,
+            "vessel_tortuosities.method",
+            {"simple", "curvature"},
+        )
+
     def to_config(self) -> VesselTortuosityConfig:
         return VesselTortuosityConfig(
             enabled=self.enabled,
             inner_circle=self.inner_circle,
             outer_circle=self.outer_circle,
+            method=self.method,
         )
 
 

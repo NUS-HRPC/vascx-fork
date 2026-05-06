@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import numpy as np
 import pandas as pd
 from PIL import Image
+from scipy.interpolate import splprep, splev
 
 from ..config import OverlayCircle
 from ..geometry.vessel_masks import typed_vessel_masks
@@ -42,8 +43,67 @@ VESSEL_TORTUOSITY_SUMMARY_COLUMNS = [
     "mean_tortuosity_weighted",
 ]
 
+TortuosityMethod = Literal["simple", "curvature"]
 
-def compute_path_tortuosity(path_xy: np.ndarray) -> tuple[float, float, float]:
+
+def curvature_tortuosity(points: np.ndarray) -> float:
+    """
+    Compute curvature tortuosity of a 2D centerline using a B-spline.
+    """
+    points = np.asarray(points, dtype=float)
+    eps = 1e-12
+
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise ValueError("points must have shape (N, 2)")
+
+    diffs = np.diff(points, axis=0)
+    keep = np.r_[True, np.linalg.norm(diffs, axis=1) > eps]
+    points = points[keep]
+
+    n_points = len(points)
+    if n_points < 3:
+        return 0.0
+
+    spline_degree = min(3, n_points - 1)
+    try:
+        spline, _ = splprep(
+            [points[:, 0], points[:, 1]],
+            s=0.0,
+            k=spline_degree,
+            per=False,
+        )
+    except ValueError:
+        return 0.0
+
+    u = np.linspace(0.0, 1.0, 500)
+    dx, dy = splev(u, spline, der=1)
+    ddx, ddy = splev(u, spline, der=2)
+
+    dx = np.asarray(dx)
+    dy = np.asarray(dy)
+    ddx = np.asarray(ddx)
+    ddy = np.asarray(ddy)
+
+    speed = np.sqrt(dx**2 + dy**2)
+    valid = speed > eps
+
+    kappa = np.zeros_like(speed)
+    kappa[valid] = (
+        np.abs(dx[valid] * ddy[valid] - dy[valid] * ddx[valid]) / speed[valid] ** 3
+    )
+
+    numerator = np.trapezoid(kappa**2 * speed, u)
+    path_length = np.trapezoid(speed, u)
+    if path_length <= eps:
+        return 0.0
+
+    return float(numerator / path_length)
+
+
+def compute_path_tortuosity(
+    path_xy: np.ndarray,
+    method: TortuosityMethod = "simple",
+) -> tuple[float, float, float]:
     """Return path length, chord length, and tortuosity for an ordered path."""
     if len(path_xy) < 2:
         return 0.0, 0.0, float("nan")
@@ -51,9 +111,14 @@ def compute_path_tortuosity(path_xy: np.ndarray) -> tuple[float, float, float]:
     deltas = np.diff(path_xy, axis=0)
     path_length_px = float(np.hypot(deltas[:, 0], deltas[:, 1]).sum())
     chord_length_px = float(np.linalg.norm(path_xy[-1] - path_xy[0]))
-    tortuosity = (
-        path_length_px / chord_length_px if chord_length_px > 0.0 else float("nan")
-    )
+    if method == "simple":
+        tortuosity = (
+            path_length_px / chord_length_px if chord_length_px > 0.0 else float("nan")
+        )
+    elif method == "curvature":
+        tortuosity = curvature_tortuosity(path_xy)
+    else:
+        raise ValueError(f"Unsupported vessel tortuosity method: {method}")
     return path_length_px, chord_length_px, float(tortuosity)
 
 
@@ -66,9 +131,13 @@ def vessel_tortuosity_record(
     outer_radius_px: float,
     connection_index: int,
     path_xy: np.ndarray,
+    method: TortuosityMethod = "simple",
 ) -> dict[str, object]:
     """Build a one-row vessel tortuosity record from an ordered skeleton path."""
-    path_length_px, chord_length_px, tortuosity = compute_path_tortuosity(path_xy)
+    path_length_px, chord_length_px, tortuosity = compute_path_tortuosity(
+        path_xy,
+        method=method,
+    )
     return {
         "image_id": image_id,
         "inner_circle": inner_circle.name,
@@ -161,6 +230,7 @@ def measure_vessel_tortuosities_between_disc_circle_pair(
     outer_circle: OverlayCircle,
     output_path: Optional[Path] = None,
     boundary_tolerance_px: float = 1.5,
+    method: TortuosityMethod = "simple",
 ) -> pd.DataFrame:
     """Measure per-segment vessel tortuosities between two circles."""
     if not disc_geometry_path.exists():
@@ -212,6 +282,7 @@ def measure_vessel_tortuosities_between_disc_circle_pair(
                     outer_radius_px=outer_radius_px,
                     connection_index=vessel_path.connection_index,
                     path_xy=vessel_path.path_xy,
+                    method=method,
                 )
                 for vessel_path in vessel_paths
             )

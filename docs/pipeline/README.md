@@ -516,13 +516,19 @@ For each retained path segment:
 
 1. Compute total path length along the skeleton.
 2. Compute straight-line chord length from the first point to the last point.
-3. Compute tortuosity as `path_length / chord_length`.
+3. Compute tortuosity with `vessel_tortuosities.method`.
 4. Save the segment endpoints, path length, chord length, tortuosity, and vessel type.
 
-Formula:
+The default `simple` method uses:
 
 $$
 T = \frac{L_{path}}{L_{chord}}
+$$
+
+The `curvature` method uses B-spline mean squared curvature along arc length:
+
+$$
+T = \frac{\int \kappa(s)^2\,ds}{L_{path}}
 $$
 
 where
